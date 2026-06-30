@@ -3,8 +3,9 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
+from textwrap import dedent
 
 from zentracker.metrics import (
     METRIC_TYPES,
@@ -28,8 +29,21 @@ def parse_iso_date(raw_value: str) -> date:
         return date.fromisoformat(raw_value)
     except ValueError as exc:
         raise argparse.ArgumentTypeError(
-            f"data invalida: {raw_value}. Use YYYY-MM-DD."
+            f"invalid date: {raw_value}. Use YYYY-MM-DD."
         ) from exc
+
+
+def parse_positive_int(raw_value: str) -> int:
+    try:
+        value = int(raw_value, 10)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"invalid number of days: {raw_value}."
+        ) from exc
+
+    if value < 1:
+        raise argparse.ArgumentTypeError("number of days must be greater than zero.")
+    return value
 
 
 def parse_data_dir(raw_value: str) -> Path:
@@ -60,47 +74,72 @@ def program_name() -> str:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog=program_name())
+    parser = argparse.ArgumentParser(
+        prog=program_name(),
+        description="Track anything and everything locally right from your CLI.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=dedent(
+            """\
+            examples:
+              zt add weight 92.4 --type number
+              zt add gym yes --type bool
+              zt add mood "focused"
+              zt metrics
+              zt table 30 weight,gym,mood
+              zt table --from 2026-06-01 --to 2026-06-30 --metrics weight,gym
+            """
+        ),
+    )
     parser.add_argument(
         "--data-dir",
         default=default_data_dir(),
         type=parse_data_dir,
-        help="diretorio onde os arquivos por metrica sao armazenados",
+        help="directory where metric files are stored",
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    add_parser = subparsers.add_parser("add", help="adiciona um registro")
-    add_parser.add_argument("metric", help="metrica a registrar")
-    add_parser.add_argument("value", help="valor da metrica")
+    add_parser = subparsers.add_parser("add", help="add one metric entry")
+    add_parser.add_argument("metric", help="metric name")
+    add_parser.add_argument("value", help="metric value")
     add_parser.add_argument(
         "--type",
         dest="metric_type",
         choices=METRIC_TYPES,
-        help="tipo da metrica ao criar arquivo novo; padrao: text",
+        help="metric type when creating a new file; default: text",
     )
     add_parser.add_argument(
         "--date",
         dest="entry_date",
         type=parse_iso_date,
         default=date.today(),
-        help="data do registro em YYYY-MM-DD; padrao: hoje",
+        help="entry date in YYYY-MM-DD; default: today",
     )
     add_parser.set_defaults(func=handle_add)
 
-    table_parser = subparsers.add_parser("table", help="mostra tabela por periodo")
-    table_parser.add_argument("--from", dest="start_date", required=True, type=parse_iso_date)
-    table_parser.add_argument("--to", dest="end_date", required=True, type=parse_iso_date)
+    table_parser = subparsers.add_parser("table", help="show a table for a date range")
+    table_parser.add_argument(
+        "days",
+        nargs="?",
+        type=parse_positive_int,
+        help="number of days through today, for example: 30",
+    )
+    table_parser.add_argument(
+        "metrics_arg",
+        nargs="?",
+        help="comma-separated metric list, for example: weight,gym",
+    )
+    table_parser.add_argument("--from", dest="start_date", type=parse_iso_date)
+    table_parser.add_argument("--to", dest="end_date", type=parse_iso_date)
     table_parser.add_argument(
         "--metrics",
-        required=True,
-        help="lista separada por virgula, ex: peso,academia",
+        help="comma-separated metric list, for example: weight,gym",
     )
     table_parser.set_defaults(func=handle_table)
 
     metrics_parser = subparsers.add_parser(
         "metrics",
-        help="lista metricas que ja tem dados",
+        help="list metrics that already have data",
     )
     metrics_parser.set_defaults(func=handle_metrics)
 
@@ -116,37 +155,58 @@ def handle_add(args: argparse.Namespace) -> int:
         existing_file_with_content = path.exists() and path.stat().st_size > 0
         if existing_file_with_content and requested_type != metric_type:
             raise ValueError(
-                f"{metric_name} ja existe como {metric_type}; nao use --type para mudar tipo."
+                f"{metric_name} already exists as {metric_type}; do not use --type to change it."
             )
         metric_type = requested_type
 
     value = validate_metric_value(metric_type, args.value)
     append_entry(args.data_dir, metric_name, metric_type, Entry(args.entry_date, value))
-    print(f"registrado: {metric_name} {value} em {args.entry_date.isoformat()}")
+    print(f"recorded: {metric_name} {value} on {args.entry_date.isoformat()}")
     return 0
 
 
 def handle_table(args: argparse.Namespace) -> int:
-    if args.start_date > args.end_date:
-        raise ValueError("--from nao pode ser maior que --to.")
+    start_date, end_date, raw_metrics = resolve_table_args(args)
 
-    metric_names = [item.strip() for item in args.metrics.split(",") if item.strip()]
+    metric_names = [item.strip() for item in raw_metrics.split(",") if item.strip()]
     if not metric_names:
-        raise ValueError("informe ao menos uma metrica em --metrics.")
+        raise ValueError("provide at least one metric.")
 
     for metric_name in metric_names:
         validate_metric_name(metric_name)
 
     datasets = {metric_name: read_metric(args.data_dir, metric_name) for metric_name in metric_names}
     rows: list[list[str]] = []
-    for current_day in iter_days(args.start_date, args.end_date):
+    for current_day in iter_days(start_date, end_date):
         row = [current_day.isoformat()]
         for metric_name in metric_names:
             row.append(datasets[metric_name].get(current_day, "-"))
         rows.append(row)
 
-    print(format_table(["data", *metric_names], rows))
+    print(format_table(["date", *metric_names], rows))
     return 0
+
+
+def resolve_table_args(args: argparse.Namespace) -> tuple[date, date, str]:
+    if args.days is not None or args.metrics_arg is not None:
+        if args.days is None or args.metrics_arg is None:
+            raise ValueError("use the shorthand format as: table 30 weight,gym.")
+        if args.start_date is not None or args.end_date is not None or args.metrics is not None:
+            raise ValueError("do not mix table DAYS METRICS with --from/--to/--metrics.")
+
+        end_date = date.today()
+        start_date = end_date - timedelta(days=args.days - 1)
+        return start_date, end_date, args.metrics_arg
+
+    if args.start_date is None or args.end_date is None or args.metrics is None:
+        raise ValueError(
+            "use table DAYS METRICS or provide --from, --to, and --metrics."
+        )
+
+    if args.start_date > args.end_date:
+        raise ValueError("--from cannot be later than --to.")
+
+    return args.start_date, args.end_date, args.metrics
 
 
 def handle_metrics(args: argparse.Namespace) -> int:
@@ -186,4 +246,4 @@ def main() -> int:
     try:
         return args.func(args)
     except ValueError as exc:
-        parser.exit(status=2, message=f"erro: {exc}\n")
+        parser.exit(status=2, message=f"error: {exc}\n")

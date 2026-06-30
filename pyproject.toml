@@ -5,8 +5,11 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "zentracker"
 version = "0.1.0"
-description = "CLI local-first para registrar metricas pessoais em arquivos texto."
+description = "Local-first CLI to track anything in plain text, inspired by todo.txt."
+readme = "README.md"
 requires-python = ">=3.11"
+license = "MIT"
+keywords = ["cli", "local-first", "metrics", "plain-text", "tracking", "todo.txt"]
 
 [project.scripts]
 zt = "zentracker.cli:main"

@@ -14,10 +14,10 @@ _METRIC_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 def validate_metric_name(metric_name: str) -> str:
     name = metric_name.strip()
     if not name:
-        raise ValueError("nome da metrica nao pode ficar vazio.")
+        raise ValueError("metric name cannot be empty.")
     if not _METRIC_NAME_PATTERN.fullmatch(name):
         raise ValueError(
-            "nome da metrica aceita apenas letras, numeros, '_' e '-'."
+            "metric name accepts only letters, numbers, '_' and '-'."
         )
     return name
 
@@ -26,7 +26,7 @@ def validate_metric_type(metric_type: str) -> str:
     value = metric_type.strip().lower()
     if value not in METRIC_TYPES:
         valid = ", ".join(METRIC_TYPES)
-        raise ValueError(f"tipo de metrica desconhecido: {metric_type}. Opcoes: {valid}.")
+        raise ValueError(f"unknown metric type: {metric_type}. Options: {valid}.")
     return value
 
 
@@ -43,7 +43,7 @@ def format_metric_type_header(metric_type: str) -> str:
 def validate_metric_value(metric_type: str, raw_value: str) -> str:
     value = raw_value.strip()
     if not value:
-        raise ValueError("valor da metrica nao pode ficar vazio.")
+        raise ValueError("metric value cannot be empty.")
 
     metric_type = validate_metric_type(metric_type)
     if metric_type == "text":
@@ -55,7 +55,7 @@ def validate_metric_value(metric_type: str, raw_value: str) -> str:
     if metric_type == "number":
         return validate_number(value)
 
-    raise AssertionError(f"tipo de metrica sem validador: {metric_type}")
+    raise AssertionError(f"metric type without validator: {metric_type}")
 
 
 def validate_bool(value: str) -> str:
@@ -64,23 +64,23 @@ def validate_bool(value: str) -> str:
         return "sim"
     if normalized in {"nao", "false", "0"}:
         return "nao"
-    raise ValueError("bool aceita apenas sim/nao, true/false ou 1/0.")
+    raise ValueError("bool accepts only sim/nao, true/false, or 1/0.")
 
 
 def validate_integer(value: str) -> str:
     try:
         return str(int(value, 10))
     except ValueError as exc:
-        raise ValueError("integer exige um numero inteiro.") from exc
+        raise ValueError("integer requires a whole number.") from exc
 
 
 def validate_number(value: str) -> str:
     try:
         parsed = Decimal(value)
     except InvalidOperation as exc:
-        raise ValueError("number exige um valor numerico.") from exc
+        raise ValueError("number requires a numeric value.") from exc
 
     if not parsed.is_finite():
-        raise ValueError("number exige um valor numerico finito.")
+        raise ValueError("number requires a finite numeric value.")
 
     return value

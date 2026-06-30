@@ -1,176 +1,150 @@
-# Especificação V1
+# ZenTracker V1 Specification
 
-## Objetivo
+## Goal
 
-Construir uma CLI local-first para registrar e consultar métricas pessoais simples em arquivos texto, com foco em baixo atrito, legibilidade e futura integração com agentes que transformem linguagem natural em comandos estruturados.
+Build a local-first CLI for recording and querying arbitrary personal metrics in plain text files.
 
-## Escopo inicial
+ZenTracker should feel as lightweight as `todo.txt`: fast to type, human-readable, grep-friendly, and easy to version. The first version exposes structured commands, while leaving room for compact natural-language-like input later.
 
-A V1 cobre métricas arbitrárias com nomes seguros e quatro tipos iniciais:
+## Scope
+
+V1 supports arbitrary metrics with safe names and four initial types:
 
 - `text`
 - `number`
 - `integer`
 - `bool`
 
-O desenho deve permitir criar novas métricas no próprio uso da CLI, sem arquivo de configuração separado e sem criar uma arquitetura genérica demais agora.
+New metrics can be created through normal CLI usage. No separate config file is required.
 
-## Princípios
+## Principles
 
-- uso via linha de comando;
-- dados em arquivos de texto simples;
-- um arquivo por métrica;
-- sem banco de dados;
-- sem dependências pesadas;
-- fácil de automatizar via shell, Python ou agente de IA.
+- command-line first;
+- local-first;
+- one plain text file per metric;
+- no database;
+- no required cloud sync;
+- no heavy dependencies;
+- easy to automate from shell, Python, or agents.
 
-## Modelo de dados
+## Metric Names
 
-### Nomes de métricas
+Metric names accept:
 
-- nomes aceitam letras, números, `_` e `-`;
-- nomes inválidos devem ser rejeitados para evitar path traversal e arquivos ambíguos.
+- letters;
+- numbers;
+- `_`;
+- `-`.
 
-### Tipos de métricas
+Invalid names are rejected to avoid path traversal and ambiguous files.
 
-- `text`: qualquer texto não vazio;
-- `number`: número decimal;
-- `integer`: número inteiro;
-- `bool`: valores equivalentes a sim/não.
+## Metric Types
 
-Se um arquivo não tiver header de tipo, a métrica é lida como `text`.
+- `text`: any non-empty text;
+- `number`: decimal number;
+- `integer`: whole number;
+- `bool`: values equivalent to yes/no.
 
-## Armazenamento
+If a file has no type header, it is read as `text`.
 
-Cada métrica fica em seu próprio arquivo texto dentro de um diretório de dados.
+## Storage
 
-Sugestão inicial:
+Each metric is stored in its own text file:
 
 ```txt
-data/peso.txt
-data/academia.txt
+weight.txt
+gym.txt
+mood.txt
 ```
 
-Formato de linha sugerido para a V1:
+Suggested file format:
 
 ```txt
 # type:number
 2026-06-23 92.4
+2026-06-24 92.1
 ```
 
-Exemplo booleano:
+Boolean example:
 
 ```txt
 # type:bool
 2026-06-23 sim
+2026-06-24 nao
 ```
 
-Regras:
+Rules:
 
-- a data vem em ISO `YYYY-MM-DD`;
-- a primeira linha pode declarar `# type:<tipo>`;
-- arquivos sem header são tratados como `text`;
-- o valor vem após um espaço;
-- o arquivo pode conter múltiplas linhas para a mesma data;
-- a resolução de conflito acontece na leitura, escolhendo a última linha da data.
+- dates use ISO `YYYY-MM-DD`;
+- the first line may declare `# type:<type>`;
+- files without headers are treated as `text`;
+- values come after the first whitespace separator;
+- multiple entries for the same date are allowed;
+- reads resolve same-day conflicts by using the last entry for that date.
 
-## Interface de linha de comando
+## CLI
 
-### Registro
-
-Comandos iniciais:
+### Add
 
 ```bash
-zentracker add peso 92.4 --type number --date 2026-06-23
-zentracker add academia sim --type bool --date 2026-06-23
-zentracker add humor "bem disposto" --date 2026-06-23
+zt add weight 92.4 --type number --date 2026-06-23
+zt add gym sim --type bool --date 2026-06-23
+zt add mood "focused" --date 2026-06-23
 ```
 
-Regras:
+Rules:
 
-- `--date` é opcional;
-- sem `--date`, usar a data atual;
-- `--type` é opcional;
-- sem `--type`, uma métrica nova é criada como `text`;
-- se o arquivo já declara um tipo, registros novos devem validar contra esse tipo.
+- `--date` is optional and defaults to today;
+- `--type` is optional for new metrics and defaults to `text`;
+- existing metrics validate new entries against the type declared in the file.
 
-### Consulta tabular
-
-Comando inicial:
+### Metrics
 
 ```bash
-zentracker table --from 2026-06-01 --to 2026-06-30 --metrics peso,academia
+zt metrics
 ```
 
-Saída esperada:
+Lists metric files that already contain data.
 
-```txt
-data        peso    academia
-2026-06-20  92.4    sim
-2026-06-21  92.1    nao
-2026-06-22  -       sim
+### Table
+
+```bash
+zt table 30 weight,gym,mood
+zt table --from 2026-06-01 --to 2026-06-30 --metrics weight,gym,mood
 ```
 
-Regras:
+Rules:
 
-- listar um dia por linha dentro do intervalo;
-- permitir combinar mais de uma métrica na mesma tabela;
-- preencher ausência com `-`;
-- ao montar a tabela, usar a última entrada encontrada no dia para cada métrica.
+- list one day per row;
+- short form `table DAYS METRICS` shows the last N days including today;
+- combine one or more metrics in the same table;
+- fill missing data with `-`;
+- use the last entry found for each date and metric.
 
-## Casos de uso da V1
+## Success Criteria
 
-1. Registrar o peso do dia.
-2. Registrar explicitamente se foi ou não à academia.
-3. Registrar uma métrica textual arbitrária.
-4. Consultar um intervalo de datas com uma única métrica.
-5. Consultar um intervalo de datas combinando várias métricas.
-6. Preparar o caminho para um agente gerar esses mesmos comandos a partir de texto livre.
+V1 is ready when users can:
 
-## Decisões importantes
+- install the package and run `zt` from any directory;
+- record arbitrary typed metrics quickly;
+- list metrics that already have data;
+- query one or more metrics as a date table;
+- use plain text files directly when needed.
 
-### Múltiplas entradas no mesmo dia
+## Out of Scope For V1
 
-- serão permitidas no arquivo;
-- a consulta usará a última entrada do dia;
-- isso preserva histórico bruto e evita reescrita de arquivo.
+- graphical interface;
+- built-in sync;
+- database storage;
+- dashboard UI;
+- advanced statistics;
+- native natural-language parsing;
+- interactive editing of old entries.
 
-### Dados ausentes
+## Future Ideas
 
-- um dia sem linha para uma métrica é `nao informado`;
-- isso é diferente de um valor booleano `nao`.
-
-### Linguagem natural
-
-- não faz parte da V1;
-- a V1 deve expor comandos estruturados simples para que um agente possa chamá-los depois.
-
-## Fora de escopo na V1
-
-- interface gráfica;
-- sincronização;
-- banco de dados;
-- dashboards;
-- estatísticas avançadas;
-- parsing nativo de linguagem natural;
-- edição interativa de registros antigos.
-
-## Plano de implementação
-
-1. Criar a estrutura inicial em Python.
-2. Definir o pacote e o ponto de entrada da CLI.
-3. Criar o diretório `data/` e a camada mínima de persistência por métrica.
-4. Implementar `add` com validação para `peso` e `academia`.
-5. Implementar leitura por período com resolução de "última entrada do dia".
-6. Implementar `table` com múltiplas métricas e preenchimento de ausências com `-`.
-7. Adicionar testes para parsing, validação, conflito no mesmo dia e geração da tabela.
-8. Atualizar o README com exemplos reais de uso da V1.
-
-## Critério de sucesso da V1
-
-A V1 está pronta quando for possível:
-
-- registrar `peso` e `academia` rapidamente no terminal;
-- consultar um período em formato tabular;
-- combinar ambas as métricas na mesma saída;
-- lidar corretamente com dias ausentes e múltiplos registros no mesmo dia.
+- compact input for recording several metrics at once;
+- natural-language-assisted input that expands into structured metric entries;
+- terminal-friendly ASCII plots;
+- export formats for JavaScript chart libraries, useful for Obsidian or Markdown notes;
+- lightweight summaries by period.
