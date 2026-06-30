@@ -60,11 +60,11 @@ def validate_metric_value(metric_type: str, raw_value: str) -> str:
 
 def validate_bool(value: str) -> str:
     normalized = value.lower()
-    if normalized in {"sim", "true", "1"}:
-        return "sim"
-    if normalized in {"nao", "false", "0"}:
-        return "nao"
-    raise ValueError("bool accepts only sim/nao, true/false, or 1/0.")
+    if normalized in {"yes", "true", "1", "sim"}:
+        return "yes"
+    if normalized in {"no", "false", "0", "nao"}:
+        return "no"
+    raise ValueError("bool accepts only yes/no, true/false, or 1/0.")
 
 
 def validate_integer(value: str) -> str:

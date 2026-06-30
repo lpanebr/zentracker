@@ -36,6 +36,15 @@ def append_entry(data_dir: Path, metric_name: str, metric_type: str, entry: Entr
         handle.write(f"{entry.entry_date.isoformat()} {entry.value}\n")
 
 
+def write_metric(data_dir: Path, metric_name: str, metric_type: str, entries: list[Entry]) -> None:
+    ensure_data_dir(data_dir)
+    path = metric_path(data_dir, metric_name)
+    with path.open("w", encoding="utf-8") as handle:
+        handle.write(f"{format_metric_type_header(metric_type)}\n")
+        for entry in entries:
+            handle.write(f"{entry.entry_date.isoformat()} {entry.value}\n")
+
+
 def read_metric_type(data_dir: Path, metric_name: str) -> str:
     path = metric_path(data_dir, metric_name)
     if not path.exists():
@@ -67,7 +76,7 @@ def read_metric(data_dir: Path, metric_name: str) -> dict[date, str]:
 
             parts = line.split(maxsplit=1)
             if len(parts) != 2:
-                raise ValueError(f"linha invalida em {path}: {raw_line.rstrip()}")
+                raise ValueError(f"invalid line in {path}: {raw_line.rstrip()}")
 
             raw_date, value = parts
             latest_by_date[date.fromisoformat(raw_date)] = value

@@ -21,6 +21,7 @@ from zentracker.storage import (
     metric_path,
     read_metric,
     read_metric_type,
+    write_metric,
 )
 
 
@@ -85,6 +86,7 @@ def build_parser() -> argparse.ArgumentParser:
               zt add gym yes --type bool
               zt add mood "focused"
               zt metrics
+              zt demo --data-dir /tmp/zentracker-demo
               zt table 30 weight,gym,mood
               zt table --from 2026-06-01 --to 2026-06-30 --metrics weight,gym
             """
@@ -142,6 +144,23 @@ def build_parser() -> argparse.ArgumentParser:
         help="list metrics that already have data",
     )
     metrics_parser.set_defaults(func=handle_metrics)
+
+    demo_parser = subparsers.add_parser(
+        "demo",
+        help="generate sample metrics relative to today",
+    )
+    demo_parser.add_argument(
+        "--days",
+        type=parse_positive_int,
+        default=30,
+        help="number of days to generate; default: 30",
+    )
+    demo_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="overwrite demo metrics if this data directory already has metrics",
+    )
+    demo_parser.set_defaults(func=handle_demo)
 
     return parser
 
@@ -220,6 +239,50 @@ def handle_metrics(args: argparse.Namespace) -> int:
         print(metric_name)
 
     return 0
+
+
+def handle_demo(args: argparse.Namespace) -> int:
+    existing_metrics = list_metric_names(args.data_dir)
+    if existing_metrics and not args.force:
+        raise ValueError(
+            "data directory already has metrics; use --force or choose another --data-dir."
+        )
+
+    end_date = date.today()
+    start_date = end_date - timedelta(days=args.days - 1)
+    days = iter_days(start_date, end_date)
+
+    demo_metrics = build_demo_metrics(days)
+    for metric_name, metric_type, entries in demo_metrics:
+        write_metric(args.data_dir, metric_name, metric_type, entries)
+
+    display_names = ", ".join(metric_name for metric_name, _, _ in demo_metrics)
+    metrics_arg = ",".join(metric_name for metric_name, _, _ in demo_metrics)
+    print(f"generated {args.days} days of demo data: {display_names}")
+    print(f"try: {program_name()} --data-dir {args.data_dir} table {args.days} {metrics_arg}")
+    return 0
+
+
+def build_demo_metrics(days: list[date]) -> list[tuple[str, str, list[Entry]]]:
+    mood_values = ["focused", "calm", "tired", "energetic", "scattered"]
+    weight_entries: list[Entry] = []
+    gym_entries: list[Entry] = []
+    mood_entries: list[Entry] = []
+
+    for index, current_day in enumerate(days):
+        weight = 92.8 - (index * 0.04) + ((index % 5) - 2) * 0.05
+        weight_entries.append(Entry(current_day, f"{weight:.1f}"))
+
+        went_to_gym = index % 3 != 1
+        gym_entries.append(Entry(current_day, "yes" if went_to_gym else "no"))
+
+        mood_entries.append(Entry(current_day, mood_values[index % len(mood_values)]))
+
+    return [
+        ("weight", "number", weight_entries),
+        ("gym", "bool", gym_entries),
+        ("mood", "text", mood_entries),
+    ]
 
 
 def format_table(headers: list[str], rows: list[list[str]]) -> str:

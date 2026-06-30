@@ -98,7 +98,7 @@ class ZentrackerCliTest(unittest.TestCase):
                 encoding="utf-8",
             )
             (data_dir / "gym.txt").write_text(
-                "2026-06-20 sim\n2026-06-21 nao\n2026-06-22 sim\n",
+                "2026-06-20 yes\n2026-06-21 no\n2026-06-22 yes\n",
                 encoding="utf-8",
             )
 
@@ -119,9 +119,9 @@ class ZentrackerCliTest(unittest.TestCase):
                 result.stdout.strip().splitlines(),
                 [
                     "date        weight  gym",
-                    "2026-06-20  92.4    sim",
-                    "2026-06-21  92.1    nao",
-                    "2026-06-22  -       sim",
+                    "2026-06-20  92.4    yes",
+                    "2026-06-21  92.1    no",
+                    "2026-06-22  -       yes",
                 ],
             )
 
@@ -135,7 +135,7 @@ class ZentrackerCliTest(unittest.TestCase):
                 encoding="utf-8",
             )
             (data_dir / "gym.txt").write_text(
-                f"{today.isoformat()} sim\n",
+                f"{today.isoformat()} yes\n",
                 encoding="utf-8",
             )
 
@@ -153,7 +153,7 @@ class ZentrackerCliTest(unittest.TestCase):
                 [
                     "date        weight  gym",
                     f"{yesterday.isoformat()}  92.4    -",
-                    f"{today.isoformat()}  92.1    sim",
+                    f"{today.isoformat()}  92.1    yes",
                 ],
             )
 
@@ -193,7 +193,27 @@ class ZentrackerCliTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(
                 (Path(temp_dir) / "gym.txt").read_text(encoding="utf-8"),
-                "# type:bool\n2026-06-23 sim\n",
+                "# type:bool\n2026-06-23 yes\n",
+            )
+
+    def test_add_bool_metric_accepts_legacy_sim_nao_aliases(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self.run_cli(
+                "--data-dir",
+                temp_dir,
+                "add",
+                "gym",
+                "sim",
+                "--type",
+                "bool",
+                "--date",
+                "2026-06-23",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                (Path(temp_dir) / "gym.txt").read_text(encoding="utf-8"),
+                "# type:bool\n2026-06-23 yes\n",
             )
 
     def test_add_bool_metric_rejects_invalid_value(self) -> None:
@@ -209,7 +229,7 @@ class ZentrackerCliTest(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 2)
-            self.assertIn("bool accepts only sim/nao, true/false, or 1/0.", result.stderr)
+            self.assertIn("bool accepts only yes/no, true/false, or 1/0.", result.stderr)
 
     def test_add_number_metric_rejects_non_numeric_value_after_header_exists(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -272,6 +292,60 @@ class ZentrackerCliTest(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout.strip().splitlines(), ["mood", "weight"])
+
+    def test_demo_generates_relative_sample_data(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            today = date.today()
+
+            result = self.run_cli("--data-dir", temp_dir, "demo", "--days", "3")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("generated 3 days of demo data: weight, gym, mood", result.stdout)
+            self.assertIn("table 3 weight,gym,mood", result.stdout)
+            self.assertEqual(
+                (Path(temp_dir) / "weight.txt").read_text(encoding="utf-8").splitlines()[0],
+                "# type:number",
+            )
+            self.assertEqual(
+                (Path(temp_dir) / "gym.txt").read_text(encoding="utf-8").splitlines()[0],
+                "# type:bool",
+            )
+            self.assertIn(
+                today.isoformat(),
+                (Path(temp_dir) / "mood.txt").read_text(encoding="utf-8"),
+            )
+
+    def test_demo_data_is_useful_with_table_shorthand(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self.run_cli("--data-dir", temp_dir, "demo", "--days", "2")
+
+            result = self.run_cli("--data-dir", temp_dir, "table", "2", "weight,gym,mood")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            lines = result.stdout.strip().splitlines()
+            self.assertEqual(lines[0], "date        weight  gym  mood")
+            self.assertEqual(len(lines), 3)
+            self.assertNotIn("  -       -    -", result.stdout)
+
+    def test_demo_refuses_existing_metrics_without_force(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "weight.txt").write_text("# type:number\n2026-06-23 92.4\n", encoding="utf-8")
+
+            result = self.run_cli("--data-dir", temp_dir, "demo")
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("data directory already has metrics", result.stderr)
+
+    def test_demo_force_overwrites_demo_metrics(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "weight.txt").write_text("# type:number\n2026-06-23 92.4\n", encoding="utf-8")
+
+            result = self.run_cli("--data-dir", temp_dir, "demo", "--days", "1", "--force")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(date.today().isoformat(), (data_dir / "weight.txt").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

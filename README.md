@@ -48,9 +48,18 @@ python -m zentracker --help
 
 ## Quick Start
 
+Generate sample data relative to today:
+
+```bash
+zt --data-dir /tmp/zentracker-demo demo
+zt --data-dir /tmp/zentracker-demo table 30 weight,gym,mood
+```
+
+Or start tracking your own metrics:
+
 ```bash
 zt add weight 92.4 --type number --date 2026-06-23
-zt add gym sim --type bool --date 2026-06-23
+zt add gym yes --type bool --date 2026-06-23
 zt add mood "focused" --date 2026-06-23
 
 zt metrics
@@ -114,7 +123,7 @@ Supported types:
 - `text`: any non-empty text;
 - `number`: decimal number;
 - `integer`: whole number;
-- `bool`: `sim`/`nao`, `true`/`false`, or `1`/`0`, stored as `sim` or `nao`.
+- `bool`: `yes`/`no`, `true`/`false`, or `1`/`0`, stored as `yes` or `no`.
 
 Multiple entries for the same date are allowed. When reading tables, ZenTracker uses the last entry for that date.
 
@@ -132,12 +141,14 @@ Table output:
 
 ```txt
 date        weight  gym  mood
-2026-06-20  92.4    sim  -
-2026-06-21  92.1    nao  focused
-2026-06-22  -       sim  tired
+2026-06-20  92.4    yes  -
+2026-06-21  92.1    no   focused
+2026-06-22  -       yes  tired
 ```
 
 Sample files live in [examples/](examples/).
+
+For a more useful live demo, use `zt demo`; it generates sample data for the last 30 days relative to the current date, so `zt table 30 weight,gym,mood` immediately shows populated rows.
 
 ## Roadmap
 
