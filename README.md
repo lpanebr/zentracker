@@ -59,6 +59,7 @@ Fluxo recomendado neste ambiente, sem instalar nada:
 ```bash
 ./zt add peso 92.4 --date 2026-06-23
 ./zt add academia sim --date 2026-06-23
+./zt metrics
 ./zt table --from 2026-06-20 --to 2026-06-22 --metrics peso,academia
 ```
 
@@ -75,6 +76,7 @@ Sem instalar:
 ```bash
 python -m zentracker add peso 92.4 --date 2026-06-23
 python -m zentracker add academia sim --date 2026-06-23
+python -m zentracker metrics
 python -m zentracker table --from 2026-06-20 --to 2026-06-22 --metrics peso,academia
 ```
 
@@ -127,6 +129,15 @@ Cada linha guarda `data valor`:
 ```
 
 ## Exemplo de saída
+
+Listando métricas que já têm dados:
+
+```txt
+academia
+peso
+```
+
+Tabela por período:
 
 ```txt
 data        peso  academia

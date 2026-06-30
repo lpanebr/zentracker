@@ -4,7 +4,7 @@ import argparse
 from datetime import date
 from pathlib import Path
 
-from zentracker.metrics import get_metric
+from zentracker.metrics import get_metric, metric_names
 from zentracker.storage import Entry, append_entry, iter_days, read_metric
 
 
@@ -50,6 +50,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     table_parser.set_defaults(func=handle_table)
 
+    metrics_parser = subparsers.add_parser(
+        "metrics",
+        help="lista metricas conhecidas que ja tem dados",
+    )
+    metrics_parser.set_defaults(func=handle_metrics)
+
     return parser
 
 
@@ -81,6 +87,19 @@ def handle_table(args: argparse.Namespace) -> int:
         rows.append(row)
 
     print(format_table(["data", *metric_names], rows))
+    return 0
+
+
+def handle_metrics(args: argparse.Namespace) -> int:
+    names_with_data = [
+        metric_name
+        for metric_name in metric_names()
+        if read_metric(args.data_dir, metric_name)
+    ]
+
+    for metric_name in names_with_data:
+        print(metric_name)
+
     return 0
 
 

@@ -42,6 +42,10 @@ METRICS: dict[str, MetricSpec] = {
 }
 
 
+def metric_names() -> list[str]:
+    return sorted(METRICS)
+
+
 def get_metric(metric_name: str) -> MetricSpec:
     try:
         return METRICS[metric_name]

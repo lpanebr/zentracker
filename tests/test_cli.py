@@ -104,6 +104,18 @@ class ZentrackerCliTest(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertIn("academia aceita apenas 'sim' ou 'nao'.", result.stderr)
 
+    def test_metrics_lists_only_known_metrics_with_data(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "peso.txt").write_text("2026-06-23 92.4\n", encoding="utf-8")
+            (data_dir / "academia.txt").write_text("", encoding="utf-8")
+            (data_dir / "desconhecida.txt").write_text("2026-06-23 x\n", encoding="utf-8")
+
+            result = self.run_cli("--data-dir", temp_dir, "metrics")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip().splitlines(), ["peso"])
+
 
 if __name__ == "__main__":
     unittest.main()
