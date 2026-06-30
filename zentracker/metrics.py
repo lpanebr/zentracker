@@ -1,54 +1,86 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import re
 from decimal import Decimal, InvalidOperation
 
 
-@dataclass(frozen=True)
-class MetricSpec:
-    name: str
+DEFAULT_METRIC_TYPE = "text"
+METRIC_TYPES = ("bool", "integer", "number", "text")
+METRIC_TYPE_PREFIX = "# type:"
 
-    def validate(self, raw_value: str) -> str:
-        raise NotImplementedError
+_METRIC_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
-@dataclass(frozen=True)
-class WeightMetric(MetricSpec):
-    def validate(self, raw_value: str) -> str:
-        value = raw_value.strip()
-        if not value:
-            raise ValueError("peso exige um valor numerico.")
+def validate_metric_name(metric_name: str) -> str:
+    name = metric_name.strip()
+    if not name:
+        raise ValueError("nome da metrica nao pode ficar vazio.")
+    if not _METRIC_NAME_PATTERN.fullmatch(name):
+        raise ValueError(
+            "nome da metrica aceita apenas letras, numeros, '_' e '-'."
+        )
+    return name
 
-        try:
-            Decimal(value)
-        except InvalidOperation as exc:
-            raise ValueError("peso exige um valor numerico.") from exc
 
+def validate_metric_type(metric_type: str) -> str:
+    value = metric_type.strip().lower()
+    if value not in METRIC_TYPES:
+        valid = ", ".join(METRIC_TYPES)
+        raise ValueError(f"tipo de metrica desconhecido: {metric_type}. Opcoes: {valid}.")
+    return value
+
+
+def parse_metric_type_header(line: str) -> str | None:
+    if not line.startswith(METRIC_TYPE_PREFIX):
+        return None
+    return validate_metric_type(line.removeprefix(METRIC_TYPE_PREFIX))
+
+
+def format_metric_type_header(metric_type: str) -> str:
+    return f"{METRIC_TYPE_PREFIX}{validate_metric_type(metric_type)}"
+
+
+def validate_metric_value(metric_type: str, raw_value: str) -> str:
+    value = raw_value.strip()
+    if not value:
+        raise ValueError("valor da metrica nao pode ficar vazio.")
+
+    metric_type = validate_metric_type(metric_type)
+    if metric_type == "text":
         return value
+    if metric_type == "bool":
+        return validate_bool(value)
+    if metric_type == "integer":
+        return validate_integer(value)
+    if metric_type == "number":
+        return validate_number(value)
+
+    raise AssertionError(f"tipo de metrica sem validador: {metric_type}")
 
 
-@dataclass(frozen=True)
-class GymMetric(MetricSpec):
-    def validate(self, raw_value: str) -> str:
-        value = raw_value.strip().lower()
-        if value not in {"sim", "nao"}:
-            raise ValueError("academia aceita apenas 'sim' ou 'nao'.")
-        return value
+def validate_bool(value: str) -> str:
+    normalized = value.lower()
+    if normalized in {"sim", "true", "1"}:
+        return "sim"
+    if normalized in {"nao", "false", "0"}:
+        return "nao"
+    raise ValueError("bool aceita apenas sim/nao, true/false ou 1/0.")
 
 
-METRICS: dict[str, MetricSpec] = {
-    "peso": WeightMetric(name="peso"),
-    "academia": GymMetric(name="academia"),
-}
-
-
-def metric_names() -> list[str]:
-    return sorted(METRICS)
-
-
-def get_metric(metric_name: str) -> MetricSpec:
+def validate_integer(value: str) -> str:
     try:
-        return METRICS[metric_name]
-    except KeyError as exc:
-        valid = ", ".join(sorted(METRICS))
-        raise ValueError(f"metrica desconhecida: {metric_name}. Opcoes: {valid}.") from exc
+        return str(int(value, 10))
+    except ValueError as exc:
+        raise ValueError("integer exige um numero inteiro.") from exc
+
+
+def validate_number(value: str) -> str:
+    try:
+        parsed = Decimal(value)
+    except InvalidOperation as exc:
+        raise ValueError("number exige um valor numerico.") from exc
+
+    if not parsed.is_finite():
+        raise ValueError("number exige um valor numerico finito.")
+
+    return value

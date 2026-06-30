@@ -17,12 +17,15 @@ A base da V1 já foi implementada e testada localmente dentro do repositório.
 O que existe hoje:
 
 - CLI em Python no pacote `zentracker/`;
-- comando `add` para `peso` e `academia`;
+- comando `add` para métricas arbitrárias;
 - comando `table` para consulta tabular por período;
+- comando `metrics` para listar métricas com dados;
+- tipos por arquivo: `text`, `number`, `integer` e `bool`;
 - persistência em arquivos texto, um por métrica;
 - regra de "última entrada do dia" aplicada na leitura;
 - testes automatizados com `unittest`;
-- script wrapper `./zt` para uso sem instalação via `pip`.
+- console scripts instaláveis: `zt` e `zentracker`;
+- wrapper `./zt` apenas para desenvolvimento local sem instalação.
 
 ## Direção recomendada
 
@@ -30,28 +33,28 @@ Continuar evoluindo a CLI mínima antes de pensar em interface, banco ou sincron
 
 Escopo decidido para a primeira versão:
 
-1. Focar inicialmente em duas métricas: `peso` e `academia`.
+1. Permitir métricas arbitrárias com nomes seguros.
 2. Usar um arquivo separado por métrica.
-3. Implementar comandos estruturados de `add` e consulta tabular por período.
+3. Guardar o tipo da métrica no header opcional `# type:<tipo>`.
 4. Resolver conflitos de múltiplas entradas no mesmo dia usando a última entrada na leitura.
 5. Tratar ausência de dado como `nao informado`.
 
 ## Decisões registradas
 
 ```txt
-./zt add peso 92.4 --date 2026-06-23
-./zt add academia sim --date 2026-06-23
-./zt table --from 2026-06-01 --to 2026-06-30 --metrics peso,academia
+zt add peso 92.4 --type number --date 2026-06-23
+zt add academia sim --type bool --date 2026-06-23
+zt add humor "bem disposto" --date 2026-06-23
+zt table --from 2026-06-01 --to 2026-06-30 --metrics peso,academia,humor
 ```
 
-- `peso` armazena apenas um valor numérico.
-- `academia` armazena `sim` ou `nao`.
+- sem `--type`, métricas novas são `text`;
+- arquivos antigos sem header são lidos como `text`;
 - sem `--date`, o comando usa a data atual.
 - múltiplas entradas no mesmo dia são preservadas no arquivo, mas a consulta considera a última.
-- ausência de entrada para um dia não significa `nao`; significa `nao informado`.
-- `academia` deve ser registrada explicitamente, inclusive para `nao`.
+- ausência de entrada para um dia significa `nao informado`.
 - a saída principal da V1 é uma tabela simples por dia, com mais de uma métrica no mesmo período.
-- o projeto deve permanecer genérico o suficiente para novas métricas, sem introduzir arquitetura pesada cedo demais.
+- o projeto não deve depender de configuração por usuário para funcionar como app.
 
 ## Referência principal
 
@@ -73,33 +76,28 @@ A especificação detalhada e o plano de implementação da V1 estão em `SPEC.m
 
 ## Validação executada
 
-- `python -m unittest discover -s tests -v` passou com 4 testes.
-- `./zt table --from 2026-06-16 --to 2026-06-22 --metrics peso,academia` funcionou usando os dados fake do repositório.
+- `python -m unittest discover -s tests` passou com 11 testes.
+- fluxo manual validado com métricas `number`, `bool` e `text`.
 
 ## Pendências reais
 
-1. Decidir se o wrapper final deve continuar como `./zt` no repositório ou se também deve existir um atalho em `~/.local/bin`.
-2. Validar o uso do diretório de dados no Dropbox fora do sandbox:
-   - caminho desejado: `/home/lpanebr/Dropbox/brain-vaults/journaling/zentracker`
-   - o script `./zt` já foi ajustado para isso
-   - a validação automática falhou por limitação de escrita do sandbox, não por bug confirmado do projeto
-3. Decidir se os dados fake em `data/` devem continuar versionados ou se devem ser removidos depois que o diretório real no Dropbox estiver em uso.
-4. Melhorar a experiência de instalação, caso ainda faça sentido, porque o ambiente com `mise` ficou com `python` e `pip` resolvidos, mas `pip install -e .` não funcionou por falta de `setuptools` disponível offline.
+1. Decidir se os dados fake em `data/` devem continuar versionados.
+2. Melhorar a experiência de instalação neste ambiente local, que atualmente não tem `setuptools` importável.
 
 ## Observações sobre ambiente
 
 - `mise` foi configurado globalmente com `python 3.12.13`.
 - `python --version` e `python -m pip --version` passaram a funcionar.
-- a instalação editável do pacote continua pendente por limitação de dependências de empacotamento fora da rede.
-- por enquanto, o caminho mais confiável para uso é `./zt`.
+- a instalação editável do pacote falha neste ambiente porque `setuptools` não está instalado.
+- em ambientes Python normais, `pyproject.toml` expõe os comandos `zt` e `zentracker`.
+- `./zt` continua útil para desenvolvimento local, mas não contém mais diretórios pessoais.
 
 ## Próximos passos sugeridos
 
-1. Testar manualmente `./zt` no shell do usuário, já apontando para o diretório real no Dropbox journaling.
-2. Se a ideia for usar de qualquer lugar no terminal, criar depois um atalho simples em `~/.local/bin/zt` apontando para este repositório.
+1. Instalar `setuptools` no Python local ou usar um ambiente Python que já tenha backend de build.
+2. Rodar `python -m pip install -e .` e validar `zt --help` fora do repositório.
 3. Após validar o fluxo real, começar a pensar na próxima funcionalidade pequena:
    - resumo simples por período
-   - suporte a nova métrica
    - ingestão via agente a partir de linguagem natural estruturada
 
 ## Restrições desejadas

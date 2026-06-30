@@ -6,12 +6,14 @@ Construir uma CLI local-first para registrar e consultar métricas pessoais simp
 
 ## Escopo inicial
 
-A V1 cobre apenas duas métricas:
+A V1 cobre métricas arbitrárias com nomes seguros e quatro tipos iniciais:
 
-- `peso`
-- `academia`
+- `text`
+- `number`
+- `integer`
+- `bool`
 
-O desenho deve permitir adicionar novas métricas depois sem reescrever a base, mas sem criar uma arquitetura genérica demais agora.
+O desenho deve permitir criar novas métricas no próprio uso da CLI, sem arquivo de configuração separado e sem criar uma arquitetura genérica demais agora.
 
 ## Princípios
 
@@ -24,18 +26,19 @@ O desenho deve permitir adicionar novas métricas depois sem reescrever a base, 
 
 ## Modelo de dados
 
-### Métrica `peso`
+### Nomes de métricas
 
-- valor numérico simples;
-- um registro representa o peso de uma data;
-- se houver múltiplos registros no mesmo dia, vale o último na consulta.
+- nomes aceitam letras, números, `_` e `-`;
+- nomes inválidos devem ser rejeitados para evitar path traversal e arquivos ambíguos.
 
-### Métrica `academia`
+### Tipos de métricas
 
-- valor binário explícito;
-- valores aceitos: `sim` e `nao`;
-- ausência de registro não significa `nao`; significa `nao informado`;
-- se houver múltiplos registros no mesmo dia, vale o último na consulta.
+- `text`: qualquer texto não vazio;
+- `number`: número decimal;
+- `integer`: número inteiro;
+- `bool`: valores equivalentes a sim/não.
+
+Se um arquivo não tiver header de tipo, a métrica é lida como `text`.
 
 ## Armazenamento
 
@@ -51,13 +54,22 @@ data/academia.txt
 Formato de linha sugerido para a V1:
 
 ```txt
+# type:number
 2026-06-23 92.4
+```
+
+Exemplo booleano:
+
+```txt
+# type:bool
 2026-06-23 sim
 ```
 
 Regras:
 
 - a data vem em ISO `YYYY-MM-DD`;
+- a primeira linha pode declarar `# type:<tipo>`;
+- arquivos sem header são tratados como `text`;
 - o valor vem após um espaço;
 - o arquivo pode conter múltiplas linhas para a mesma data;
 - a resolução de conflito acontece na leitura, escolhendo a última linha da data.
@@ -69,16 +81,18 @@ Regras:
 Comandos iniciais:
 
 ```bash
-zentracker add peso 92.4 --date 2026-06-23
-zentracker add academia sim --date 2026-06-23
+zentracker add peso 92.4 --type number --date 2026-06-23
+zentracker add academia sim --type bool --date 2026-06-23
+zentracker add humor "bem disposto" --date 2026-06-23
 ```
 
 Regras:
 
 - `--date` é opcional;
 - sem `--date`, usar a data atual;
-- `peso` deve validar entrada numérica;
-- `academia` deve validar `sim` ou `nao`.
+- `--type` é opcional;
+- sem `--type`, uma métrica nova é criada como `text`;
+- se o arquivo já declara um tipo, registros novos devem validar contra esse tipo.
 
 ### Consulta tabular
 
@@ -108,9 +122,10 @@ Regras:
 
 1. Registrar o peso do dia.
 2. Registrar explicitamente se foi ou não à academia.
-3. Consultar um intervalo de datas com uma única métrica.
-4. Consultar um intervalo de datas combinando `peso` e `academia`.
-5. Preparar o caminho para um agente gerar esses mesmos comandos a partir de texto livre.
+3. Registrar uma métrica textual arbitrária.
+4. Consultar um intervalo de datas com uma única métrica.
+5. Consultar um intervalo de datas combinando várias métricas.
+6. Preparar o caminho para um agente gerar esses mesmos comandos a partir de texto livre.
 
 ## Decisões importantes
 
@@ -123,7 +138,7 @@ Regras:
 ### Dados ausentes
 
 - um dia sem linha para uma métrica é `nao informado`;
-- isso é diferente de `academia nao`.
+- isso é diferente de um valor booleano `nao`.
 
 ### Linguagem natural
 

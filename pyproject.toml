@@ -9,4 +9,8 @@ description = "CLI local-first para registrar metricas pessoais em arquivos text
 requires-python = ">=3.11"
 
 [project.scripts]
+zt = "zentracker.cli:main"
 zentracker = "zentracker.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["zentracker*"]

@@ -2,7 +2,5 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DATA_DIR="/home/lpanebr/Dropbox/brain-vaults/journaling/zentracker"
 
-mkdir -p "$DATA_DIR"
-exec python -m zentracker --data-dir "$DATA_DIR" "$@"
+ZENTRACKER_PROG="zt" PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}" exec python -m zentracker "$@"
