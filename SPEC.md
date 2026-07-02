@@ -144,9 +144,26 @@ Exports numeric and boolean metrics as a Markdown fenced code block for [ZenNote
 Rules:
 
 - `number` and `integer` values are exported directly;
-- `bool` values are exported as `yes = 1` and `no = 0`;
+- `bool` values are exported as discrete points where `yes = 1` and `no = 0`;
+- numeric curves are split at missing dates;
+- mixed numeric and boolean exports produce separate `jsxgraph` blocks;
 - `text` values are rejected;
 - missing dates are skipped rather than exported as null points.
+
+### Versioning
+
+ZenTracker follows Semantic Versioning from `0.1.0` onward.
+
+Before `1.0.0`:
+
+- minor releases may change CLI behavior, file format details, or export schemas;
+- patch releases should be limited to compatible fixes.
+
+After `1.0.0`:
+
+- breaking changes require a major version;
+- compatible features use a minor version;
+- compatible fixes use a patch version.
 
 ## Success Criteria
 

@@ -13,6 +13,13 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
+def parse_jsxgraph_blocks(output: str) -> list[dict[str, object]]:
+    blocks = []
+    for raw_block in output.strip().split("\n\n"):
+        blocks.append(json.loads(raw_block.removeprefix("```jsxgraph\n").removesuffix("\n```")))
+    return blocks
+
+
 class ZentrackerCliTest(unittest.TestCase):
     def run_cli(
         self,
@@ -28,6 +35,12 @@ class ZentrackerCliTest(unittest.TestCase):
             capture_output=True,
             check=False,
         )
+
+    def test_version_option_reports_package_version(self) -> None:
+        result = self.run_cli("--version")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertRegex(result.stdout, r"^zentracker \d+\.\d+\.\d+")
 
     def test_add_metric_writes_text_metric_file_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -376,17 +389,59 @@ class ZentrackerCliTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue(result.stdout.startswith("```jsxgraph\n"))
             self.assertTrue(result.stdout.rstrip().endswith("```"))
-            payload = json.loads(result.stdout.removeprefix("```jsxgraph\n").removesuffix("```\n"))
-            self.assertEqual(payload["dates"], ["2026-06-20", "2026-06-21"])
-            self.assertTrue(payload["axis"])
-            curves = [obj for obj in payload["objects"] if obj["type"] == "curve"]
+            numeric_payload, bool_payload = parse_jsxgraph_blocks(result.stdout)
+            self.assertEqual(numeric_payload["dates"], ["2026-06-20", "2026-06-21"])
+            self.assertEqual(bool_payload["dates"], ["2026-06-20", "2026-06-21"])
+            self.assertTrue(numeric_payload["axis"])
+            curves = [obj for obj in numeric_payload["objects"] if obj["type"] == "curve"]
             self.assertEqual(curves[0]["attributes"]["name"], "weight")
-            self.assertEqual(curves[1]["attributes"]["name"], "gym")
-            self.assertEqual(curves[1]["args"], [[0.0, 1.0], [1.0, 0.0]])
-            labels = [obj for obj in payload["objects"] if obj["type"] == "text"]
+            self.assertEqual(len(curves), 1)
+            gym_points = [
+                obj
+                for obj in bool_payload["objects"]
+                if obj["type"] == "point" and obj["args"] in ([0.0, 1.0], [1.0, 0.0])
+            ]
+            self.assertEqual(len(gym_points), 2)
+            labels = [obj for obj in numeric_payload["objects"] if obj["type"] == "text"]
             self.assertEqual(labels[0]["attributes"]["anchorX"], "left")
             self.assertEqual(labels[1]["attributes"]["anchorX"], "right")
             self.assertEqual(labels[0]["args"][1], labels[1]["args"][1])
+
+    def test_export_jsxgraph_splits_numeric_curves_at_missing_dates(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "weight.txt").write_text(
+                "# type:number\n"
+                "2026-06-20 92.4\n"
+                "2026-06-21 92.1\n"
+                "2026-06-23 91.9\n"
+                "2026-06-24 91.7\n",
+                encoding="utf-8",
+            )
+
+            result = self.run_cli(
+                "--data-dir",
+                temp_dir,
+                "export",
+                "jsxgraph",
+                "--from",
+                "2026-06-20",
+                "--to",
+                "2026-06-24",
+                "--metrics",
+                "weight",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            payload = parse_jsxgraph_blocks(result.stdout)[0]
+            curves = [obj for obj in payload["objects"] if obj["type"] == "curve"]
+            self.assertEqual(
+                [curve["args"] for curve in curves],
+                [
+                    [[0.0, 1.0], [92.4, 92.1]],
+                    [[3.0, 4.0], [91.9, 91.7]],
+                ],
+            )
 
     def test_export_jsxgraph_rejects_text_values(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

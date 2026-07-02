@@ -178,7 +178,17 @@ The output starts like this:
 ```
 ````
 
-Boolean values are exported as `yes = 1` and `no = 0`. Text metrics are rejected because JSXGraph needs plot-ready values.
+Boolean values are exported as discrete points where `yes = 1` and `no = 0`; they are not connected with a line. Numeric curves are split at missing dates so gaps are visible. When numeric and boolean metrics are exported together, ZenTracker emits separate `jsxgraph` blocks so incompatible scales are not mixed. Text metrics are rejected because JSXGraph needs plot-ready values.
+
+## Versioning
+
+ZenTracker follows [Semantic Versioning](https://semver.org/) from `0.1.0` onward. Until `1.0.0`, minor releases may change CLI behavior, file format details, or export schemas; patch releases should be limited to compatible fixes.
+
+Check the installed version with:
+
+```bash
+zt --version
+```
 
 ## Roadmap
 

@@ -6,8 +6,10 @@ import os
 import sys
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from textwrap import dedent
+from typing import TypedDict
 
 from zentracker.metrics import (
     METRIC_TYPES,
@@ -25,6 +27,18 @@ from zentracker.storage import (
     read_metric_type,
     write_metric,
 )
+
+
+class PlotSeries(TypedDict):
+    type: str
+    points: list[list[float]]
+
+
+def package_version() -> str:
+    try:
+        return version("zentracker")
+    except PackageNotFoundError:
+        return "0.0.0+unknown"
 
 
 def parse_iso_date(raw_value: str) -> date:
@@ -100,6 +114,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=default_data_dir(),
         type=parse_data_dir,
         help="directory where metric files are stored",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {package_version()}",
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -314,7 +333,8 @@ def build_jsxgraph_embed(
 ) -> str:
     days = iter_days(start_date, end_date)
     dates = [current_day.isoformat() for current_day in days]
-    series: dict[str, list[list[float]]] = {}
+    numeric_series: dict[str, PlotSeries] = {}
+    bool_series: dict[str, PlotSeries] = {}
 
     for metric_name in metric_names:
         metric_type = read_metric_type(data_dir, metric_name)
@@ -330,9 +350,15 @@ def build_jsxgraph_embed(
         if not points:
             raise ValueError(f"{metric_name} has no numeric data in the selected range.")
 
-        series[metric_name] = points
+        series = bool_series if metric_type == "bool" else numeric_series
+        series[metric_name] = {"type": metric_type, "points": points}
 
-    return format_jsxgraph_embed(dates, series)
+    blocks = []
+    if numeric_series:
+        blocks.append(format_jsxgraph_embed(dates, numeric_series))
+    if bool_series:
+        blocks.append(format_jsxgraph_embed(dates, bool_series))
+    return "\n\n".join(blocks)
 
 
 def parse_plot_value(metric_name: str, metric_type: str, entry_date: date, raw_value: str) -> float:
@@ -358,8 +384,12 @@ def parse_plot_value(metric_name: str, metric_type: str, entry_date: date, raw_v
     return float(parsed)
 
 
-def format_jsxgraph_embed(dates: list[str], series: dict[str, list[list[float]]]) -> str:
-    all_values = [point[1] for points in series.values() for point in points]
+def format_jsxgraph_embed(dates: list[str], series: dict[str, PlotSeries]) -> str:
+    all_values = [
+        point[1]
+        for metric in series.values()
+        for point in metric["points"]
+    ]
     min_y = min(all_values)
     max_y = max(all_values)
     padding = max((max_y - min_y) * 0.1, 1.0)
@@ -381,22 +411,28 @@ def format_jsxgraph_embed(dates: list[str], series: dict[str, list[list[float]]]
 
     objects = []
 
-    for index, (name, points) in enumerate(series.items()):
+    for index, (name, metric) in enumerate(series.items()):
+        metric_type = metric["type"]
+        points = metric["points"]
         color = colors[index % len(colors)]
-        objects.append(
-            {
-                "type": "curve",
-                "args": [
-                    [point[0] for point in points],
-                    [point[1] for point in points],
-                ],
-                "attributes": {
-                    "strokeColor": color,
-                    "strokeWidth": 3,
-                    "name": name,
-                },
-            }
-        )
+        if metric_type != "bool":
+            for segment in contiguous_segments(points):
+                if len(segment) < 2:
+                    continue
+                objects.append(
+                    {
+                        "type": "curve",
+                        "args": [
+                            [point[0] for point in segment],
+                            [point[1] for point in segment],
+                        ],
+                        "attributes": {
+                            "strokeColor": color,
+                            "strokeWidth": 3,
+                            "name": name,
+                        },
+                    }
+                )
         for point in points:
             objects.append(
                 {
@@ -405,7 +441,7 @@ def format_jsxgraph_embed(dates: list[str], series: dict[str, list[list[float]]]
                     "attributes": {
                         "fixed": True,
                         "name": "",
-                        "size": 2,
+                        "size": 3 if metric_type == "bool" else 2,
                         "strokeColor": color,
                         "fillColor": color,
                     },
@@ -455,6 +491,20 @@ def format_jsxgraph_embed(dates: list[str], series: dict[str, list[list[float]]]
     }
     payload_json = json.dumps(payload, indent=2)
     return f"```jsxgraph\n{payload_json}\n```"
+
+
+def contiguous_segments(points: list[list[float]]) -> list[list[list[float]]]:
+    if not points:
+        return []
+
+    segments = [[points[0]]]
+    for point in points[1:]:
+        previous = segments[-1][-1]
+        if point[0] == previous[0] + 1:
+            segments[-1].append(point)
+        else:
+            segments.append([point])
+    return segments
 
 
 def build_demo_metrics(days: list[date]) -> list[tuple[str, str, list[Entry]]]:
