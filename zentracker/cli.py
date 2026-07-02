@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from datetime import date, timedelta
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from textwrap import dedent
 
@@ -86,8 +88,9 @@ def build_parser() -> argparse.ArgumentParser:
               zt add gym yes --type bool
               zt add mood "focused"
               zt metrics
-              zt demo --data-dir /tmp/zentracker-demo
+              zt --data-dir /tmp/zentracker-demo demo
               zt table 30 weight,gym,mood
+              zt export jsxgraph 30 weight,gym
               zt table --from 2026-06-01 --to 2026-06-30 --metrics weight,gym
             """
         ),
@@ -161,6 +164,30 @@ def build_parser() -> argparse.ArgumentParser:
         help="overwrite demo metrics if this data directory already has metrics",
     )
     demo_parser.set_defaults(func=handle_demo)
+
+    export_parser = subparsers.add_parser(
+        "export",
+        help="export metric data for external tools",
+    )
+    export_parser.add_argument("format", choices=("jsxgraph",), help="export format")
+    export_parser.add_argument(
+        "days",
+        nargs="?",
+        type=parse_positive_int,
+        help="number of days through today, for example: 30",
+    )
+    export_parser.add_argument(
+        "metrics_arg",
+        nargs="?",
+        help="comma-separated metric list, for example: weight,gym",
+    )
+    export_parser.add_argument("--from", dest="start_date", type=parse_iso_date)
+    export_parser.add_argument("--to", dest="end_date", type=parse_iso_date)
+    export_parser.add_argument(
+        "--metrics",
+        help="comma-separated metric list, for example: weight,gym",
+    )
+    export_parser.set_defaults(func=handle_export)
 
     return parser
 
@@ -261,6 +288,173 @@ def handle_demo(args: argparse.Namespace) -> int:
     print(f"generated {args.days} days of demo data: {display_names}")
     print(f"try: {program_name()} --data-dir {args.data_dir} table {args.days} {metrics_arg}")
     return 0
+
+
+def handle_export(args: argparse.Namespace) -> int:
+    start_date, end_date, raw_metrics = resolve_table_args(args)
+    metric_names = [item.strip() for item in raw_metrics.split(",") if item.strip()]
+    if not metric_names:
+        raise ValueError("provide at least one metric.")
+
+    for metric_name in metric_names:
+        validate_metric_name(metric_name)
+
+    if args.format == "jsxgraph":
+        print(build_jsxgraph_embed(args.data_dir, start_date, end_date, metric_names))
+        return 0
+
+    raise AssertionError(f"unknown export format: {args.format}")
+
+
+def build_jsxgraph_embed(
+    data_dir: Path,
+    start_date: date,
+    end_date: date,
+    metric_names: list[str],
+) -> str:
+    days = iter_days(start_date, end_date)
+    dates = [current_day.isoformat() for current_day in days]
+    series: dict[str, list[list[float]]] = {}
+
+    for metric_name in metric_names:
+        metric_type = read_metric_type(data_dir, metric_name)
+        dataset = read_metric(data_dir, metric_name)
+        points: list[list[float]] = []
+
+        for index, current_day in enumerate(days):
+            raw_value = dataset.get(current_day)
+            if raw_value is None:
+                continue
+            points.append([float(index), parse_plot_value(metric_name, metric_type, current_day, raw_value)])
+
+        if not points:
+            raise ValueError(f"{metric_name} has no numeric data in the selected range.")
+
+        series[metric_name] = points
+
+    return format_jsxgraph_embed(dates, series)
+
+
+def parse_plot_value(metric_name: str, metric_type: str, entry_date: date, raw_value: str) -> float:
+    normalized = raw_value.strip().lower()
+    if metric_type == "bool":
+        if normalized in {"yes", "true", "1", "sim"}:
+            return 1.0
+        if normalized in {"no", "false", "0", "nao"}:
+            return 0.0
+
+    try:
+        parsed = Decimal(raw_value)
+    except InvalidOperation as exc:
+        raise ValueError(
+            f"{metric_name} has non-numeric value on {entry_date.isoformat()}: {raw_value}"
+        ) from exc
+
+    if not parsed.is_finite():
+        raise ValueError(
+            f"{metric_name} has non-finite value on {entry_date.isoformat()}: {raw_value}"
+        )
+
+    return float(parsed)
+
+
+def format_jsxgraph_embed(dates: list[str], series: dict[str, list[list[float]]]) -> str:
+    all_values = [point[1] for points in series.values() for point in points]
+    min_y = min(all_values)
+    max_y = max(all_values)
+    padding = max((max_y - min_y) * 0.1, 1.0)
+    right = max(len(dates) - 0.5, 0.5)
+    bounding_box = [-0.5, max_y + padding, right, min_y - padding]
+    width = bounding_box[2] - bounding_box[0]
+    height = bounding_box[1] - bounding_box[3]
+    label_y = bounding_box[1] - (height * 0.08)
+    left_label_x = max(0.15, bounding_box[0] + (width * 0.08))
+    right_label_x = bounding_box[2] - (width * 0.04)
+    colors = [
+        "#2563eb",
+        "#16a34a",
+        "#dc2626",
+        "#9333ea",
+        "#ea580c",
+        "#0891b2",
+    ]
+
+    objects = []
+
+    for index, (name, points) in enumerate(series.items()):
+        color = colors[index % len(colors)]
+        objects.append(
+            {
+                "type": "curve",
+                "args": [
+                    [point[0] for point in points],
+                    [point[1] for point in points],
+                ],
+                "attributes": {
+                    "strokeColor": color,
+                    "strokeWidth": 3,
+                    "name": name,
+                },
+            }
+        )
+        for point in points:
+            objects.append(
+                {
+                    "type": "point",
+                    "args": point,
+                    "attributes": {
+                        "fixed": True,
+                        "name": "",
+                        "size": 2,
+                        "strokeColor": color,
+                        "fillColor": color,
+                    },
+                }
+            )
+
+    objects.append(
+        {
+            "type": "text",
+            "args": [
+                left_label_x,
+                label_y,
+                " | ".join(series),
+            ],
+            "attributes": {
+                "fixed": True,
+                "fontSize": 14,
+                "anchorX": "left",
+                "anchorY": "top",
+            },
+        }
+    )
+    objects.append(
+        {
+            "type": "text",
+            "args": [
+                right_label_x,
+                label_y,
+                f"{dates[0]} to {dates[-1]}",
+            ],
+            "attributes": {
+                "fixed": True,
+                "fontSize": 12,
+                "anchorX": "right",
+                "anchorY": "top",
+            },
+        }
+    )
+
+    payload = {
+        "dates": dates,
+        "boundingbox": bounding_box,
+        "axis": True,
+        "showCopyright": False,
+        "showNavigation": True,
+        "objects": objects,
+    }
+    payload_json = json.dumps(payload, indent=2)
+    return f"```jsxgraph\n{payload_json}\n```"
 
 
 def build_demo_metrics(days: list[date]) -> list[tuple[str, str, list[Entry]]]:

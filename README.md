@@ -65,6 +65,7 @@ zt add mood "focused" --date 2026-06-23
 zt metrics
 zt table 30 weight,gym,mood
 zt table --from 2026-06-01 --to 2026-06-30 --metrics weight,gym,mood
+zt export jsxgraph 30 weight,gym
 ```
 
 The short `table` form shows the last N days, including today:
@@ -150,13 +151,42 @@ Sample files live in [examples/](examples/).
 
 For a more useful live demo, use `zt demo`; it generates sample data for the last 30 days relative to the current date, so `zt table 30 weight,gym,mood` immediately shows populated rows.
 
+## ZenNotes And JSXGraph
+
+ZenTracker can export numeric and boolean metrics as a JSXGraph Markdown block for [ZenNotes](https://github.com/ZenNotes/zennotes), which renders `jsxgraph` fenced code blocks. The block content is JSON, not JavaScript, and follows ZenNotes' `objects` schema:
+
+```bash
+zt export jsxgraph 30 weight,gym
+```
+
+The output starts like this:
+
+````txt
+```jsxgraph
+{
+  "dates": ["2026-06-01", "2026-06-02"],
+  "boundingbox": [-0.5, 101.0, 1.5, -1.0],
+  "axis": true,
+  "objects": [
+    {
+      "type": "curve",
+      "args": [[0.0, 1.0], [92.4, 92.1]],
+      "attributes": { "name": "weight" }
+    }
+  ]
+}
+```
+````
+
+Boolean values are exported as `yes = 1` and `no = 0`. Text metrics are rejected because JSXGraph needs plot-ready values.
+
 ## Roadmap
 
 - compact input for recording several metrics at once;
 - natural-language-assisted input that expands into structured metric entries;
 - lightweight summaries by period;
 - terminal-friendly ASCII plots;
-- export formats for JavaScript chart libraries, useful for Obsidian or Markdown notes;
+- more export formats for JavaScript chart libraries;
 - more table and export options.
 
 ## License

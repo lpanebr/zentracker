@@ -132,6 +132,22 @@ Rules:
 - fill missing data with `-`;
 - use the last entry found for each date and metric.
 
+### Export
+
+```bash
+zt export jsxgraph 30 weight,gym
+zt export jsxgraph --from 2026-06-01 --to 2026-06-30 --metrics weight,gym
+```
+
+Exports numeric and boolean metrics as a Markdown fenced code block for [ZenNotes](https://github.com/ZenNotes/zennotes), which renders `jsxgraph` blocks. The block content is JSON, not JavaScript, and follows ZenNotes' `objects` schema.
+
+Rules:
+
+- `number` and `integer` values are exported directly;
+- `bool` values are exported as `yes = 1` and `no = 0`;
+- `text` values are rejected;
+- missing dates are skipped rather than exported as null points.
+
 ## Success Criteria
 
 V1 is ready when users can:
@@ -157,5 +173,5 @@ V1 is ready when users can:
 - compact input for recording several metrics at once;
 - natural-language-assisted input that expands into structured metric entries;
 - terminal-friendly ASCII plots;
-- export formats for JavaScript chart libraries, useful for Obsidian or Markdown notes;
+- more export formats for JavaScript chart libraries;
 - lightweight summaries by period.

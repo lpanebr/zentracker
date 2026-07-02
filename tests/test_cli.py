@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import subprocess
 import sys
 import tempfile
@@ -346,6 +347,70 @@ class ZentrackerCliTest(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn(date.today().isoformat(), (data_dir / "weight.txt").read_text(encoding="utf-8"))
+
+    def test_export_jsxgraph_outputs_zennotes_code_block(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "weight.txt").write_text(
+                "# type:number\n2026-06-20 92.4\n2026-06-21 92.1\n",
+                encoding="utf-8",
+            )
+            (data_dir / "gym.txt").write_text(
+                "# type:bool\n2026-06-20 yes\n2026-06-21 no\n",
+                encoding="utf-8",
+            )
+
+            result = self.run_cli(
+                "--data-dir",
+                temp_dir,
+                "export",
+                "jsxgraph",
+                "--from",
+                "2026-06-20",
+                "--to",
+                "2026-06-21",
+                "--metrics",
+                "weight,gym",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue(result.stdout.startswith("```jsxgraph\n"))
+            self.assertTrue(result.stdout.rstrip().endswith("```"))
+            payload = json.loads(result.stdout.removeprefix("```jsxgraph\n").removesuffix("```\n"))
+            self.assertEqual(payload["dates"], ["2026-06-20", "2026-06-21"])
+            self.assertTrue(payload["axis"])
+            curves = [obj for obj in payload["objects"] if obj["type"] == "curve"]
+            self.assertEqual(curves[0]["attributes"]["name"], "weight")
+            self.assertEqual(curves[1]["attributes"]["name"], "gym")
+            self.assertEqual(curves[1]["args"], [[0.0, 1.0], [1.0, 0.0]])
+            labels = [obj for obj in payload["objects"] if obj["type"] == "text"]
+            self.assertEqual(labels[0]["attributes"]["anchorX"], "left")
+            self.assertEqual(labels[1]["attributes"]["anchorX"], "right")
+            self.assertEqual(labels[0]["args"][1], labels[1]["args"][1])
+
+    def test_export_jsxgraph_rejects_text_values(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "mood.txt").write_text(
+                "# type:text\n2026-06-20 focused\n",
+                encoding="utf-8",
+            )
+
+            result = self.run_cli(
+                "--data-dir",
+                temp_dir,
+                "export",
+                "jsxgraph",
+                "--from",
+                "2026-06-20",
+                "--to",
+                "2026-06-20",
+                "--metrics",
+                "mood",
+            )
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("mood has non-numeric value", result.stderr)
 
 
 if __name__ == "__main__":
