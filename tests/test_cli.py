@@ -447,6 +447,269 @@ class ZentrackerCliTest(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertIn("metric name accepts only", result.stderr)
 
+    def test_view_save_table_view(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self.run_cli(
+                "--data-dir",
+                temp_dir,
+                "view",
+                "save",
+                "@pessoal",
+                "table",
+                "+academia",
+                "+peso",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, "saved view @pessoal: table +academia +peso\n")
+            self.assertEqual(
+                json.loads((Path(temp_dir) / ".zentracker" / "views.json").read_text(encoding="utf-8")),
+                {
+                    "pessoal": {
+                        "command": "table",
+                        "tokens": ["+academia", "+peso"],
+                    }
+                },
+            )
+
+    def test_view_save_list_view(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self.run_cli(
+                "--data-dir",
+                temp_dir,
+                "view",
+                "save",
+                "@humor",
+                "list",
+                "+humor",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, "saved view @humor: list +humor\n")
+
+    def test_view_save_replaces_existing_view(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self.run_cli("--data-dir", temp_dir, "view", "save", "@pessoal", "table", "+peso")
+
+            result = self.run_cli(
+                "--data-dir",
+                temp_dir,
+                "view",
+                "save",
+                "@pessoal",
+                "list",
+                "+humor",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, "replaced view @pessoal: list +humor\n")
+
+    def test_view_list_sorts_views_by_name(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self.run_cli("--data-dir", temp_dir, "view", "save", "@pessoal", "table", "+peso")
+            self.run_cli("--data-dir", temp_dir, "view", "save", "@humor", "list", "+humor")
+
+            result = self.run_cli("--data-dir", temp_dir, "view", "list")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout.strip().splitlines(),
+                [
+                    "@humor list +humor",
+                    "@pessoal table +peso",
+                ],
+            )
+
+    def test_view_list_prints_nothing_without_views(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self.run_cli("--data-dir", temp_dir, "view", "list")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, "")
+
+    def test_view_delete_removes_view_and_leaves_empty_object(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self.run_cli("--data-dir", temp_dir, "view", "save", "@pessoal", "table", "+peso")
+
+            result = self.run_cli("--data-dir", temp_dir, "view", "delete", "@pessoal")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, "deleted view @pessoal\n")
+            self.assertEqual(
+                json.loads((Path(temp_dir) / ".zentracker" / "views.json").read_text(encoding="utf-8")),
+                {},
+            )
+
+    def test_view_execute_uses_default_30_days(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            today = date.today()
+            old_day = today - timedelta(days=30)
+            data_dir = Path(temp_dir)
+            (data_dir / "humor.txt").write_text(
+                f"{old_day.isoformat()} antigo\n{today.isoformat()} atual\n",
+                encoding="utf-8",
+            )
+            self.run_cli("--data-dir", temp_dir, "view", "save", "@humor", "list", "+humor")
+
+            result = self.run_cli("--data-dir", temp_dir, "view", "@humor")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip().splitlines(), [f"{today.isoformat()} humor atual"])
+
+    def test_view_execute_accepts_days(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            today = date.today()
+            yesterday = today - timedelta(days=1)
+            data_dir = Path(temp_dir)
+            (data_dir / "peso.txt").write_text(
+                f"{yesterday.isoformat()} 97.5\n{today.isoformat()} 97.2\n",
+                encoding="utf-8",
+            )
+            self.run_cli("--data-dir", temp_dir, "view", "save", "@peso", "table", "+peso")
+
+            result = self.run_cli("--data-dir", temp_dir, "view", "@peso", "2")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout.strip().splitlines(),
+                [
+                    "date        peso",
+                    f"{yesterday.isoformat()}  97.5",
+                    f"{today.isoformat()}  97.2",
+                ],
+            )
+
+    def test_view_execute_accepts_from_and_to(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "peso.txt").write_text(
+                "2026-07-01 97.5\n2026-07-02 97.2\n2026-07-03 97.0\n",
+                encoding="utf-8",
+            )
+            self.run_cli("--data-dir", temp_dir, "view", "save", "@peso", "list", "+peso")
+
+            result = self.run_cli(
+                "--data-dir",
+                temp_dir,
+                "view",
+                "@peso",
+                "from:2026-07-02",
+                "to:2026-07-03",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout.strip().splitlines(),
+                [
+                    "2026-07-02 peso 97.2",
+                    "2026-07-03 peso 97.0",
+                ],
+            )
+
+    def test_view_execute_rejects_save_without_at_ref(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self.run_cli("--data-dir", temp_dir, "view", "save", "pessoal", "table", "+peso")
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("view references must start with @", result.stderr)
+
+    def test_view_save_rejects_missing_metrics(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self.run_cli("--data-dir", temp_dir, "view", "save", "@pessoal", "table")
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("at least one +metric", result.stderr)
+
+    def test_view_save_rejects_saved_days(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self.run_cli("--data-dir", temp_dir, "view", "save", "@pessoal", "table", "30", "+peso")
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("accepts only +metric tokens", result.stderr)
+
+    def test_view_save_rejects_saved_range_tokens(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self.run_cli(
+                "--data-dir",
+                temp_dir,
+                "view",
+                "save",
+                "@pessoal",
+                "table",
+                "from:data",
+                "+peso",
+            )
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("accepts only +metric tokens", result.stderr)
+
+    def test_view_save_rejects_unsupported_command(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self.run_cli("--data-dir", temp_dir, "view", "save", "@pessoal", "export", "+peso")
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("support only list and table", result.stderr)
+
+    def test_view_execute_rejects_unknown_view(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self.run_cli("--data-dir", temp_dir, "view", "@missing")
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("unknown view: @missing", result.stderr)
+
+    def test_view_execute_rejects_metric_tokens(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self.run_cli("--data-dir", temp_dir, "view", "save", "@pessoal", "table", "+peso")
+
+            result = self.run_cli("--data-dir", temp_dir, "view", "@pessoal", "+sono")
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("metrics cannot be changed", result.stderr)
+
+    def test_view_names_use_unicode_normalization(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            decomposed_name = "cafe\u0301"
+
+            self.run_cli("--data-dir", temp_dir, "view", "save", f"@{decomposed_name}", "list", "+humor")
+            result = self.run_cli("--data-dir", temp_dir, "view", "@café", "from:data", "to:data")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("café", json.loads((Path(temp_dir) / ".zentracker" / "views.json").read_text(encoding="utf-8")))
+
+    def test_view_reports_invalid_json_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            views_file = Path(temp_dir) / ".zentracker" / "views.json"
+            views_file.parent.mkdir(parents=True)
+            views_file.write_text("{invalid", encoding="utf-8")
+
+            result = self.run_cli("--data-dir", temp_dir, "view", "list")
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn(f"invalid saved views file: {views_file}", result.stderr)
+
+    def test_view_reports_invalid_saved_view_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            views_file = Path(temp_dir) / ".zentracker" / "views.json"
+            views_file.parent.mkdir(parents=True)
+            views_file.write_text("[]\n", encoding="utf-8")
+
+            result = self.run_cli("--data-dir", temp_dir, "view", "list")
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("expected an object of view definitions", result.stderr)
+
+    def test_view_uses_data_dir_for_saved_views(self) -> None:
+        with tempfile.TemporaryDirectory() as first_dir, tempfile.TemporaryDirectory() as second_dir:
+            self.run_cli("--data-dir", first_dir, "view", "save", "@pessoal", "table", "+peso")
+
+            first_result = self.run_cli("--data-dir", first_dir, "view", "list")
+            second_result = self.run_cli("--data-dir", second_dir, "view", "list")
+
+            self.assertEqual(first_result.returncode, 0, first_result.stderr)
+            self.assertEqual(second_result.returncode, 0, second_result.stderr)
+            self.assertEqual(first_result.stdout, "@pessoal table +peso\n")
+            self.assertEqual(second_result.stdout, "")
+
     def test_metrics_lists_metric_files_with_data(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir)

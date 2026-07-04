@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
+import tempfile
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
+from typing import TypedDict
 
 from zentracker.metrics import (
     DEFAULT_METRIC_TYPE,
@@ -16,6 +19,11 @@ from zentracker.metrics import (
 class Entry:
     entry_date: date
     value: str
+
+
+class SavedView(TypedDict):
+    command: str
+    tokens: list[str]
 
 
 def ensure_data_dir(data_dir: Path) -> None:
@@ -103,6 +111,62 @@ def list_metric_names(data_dir: Path) -> list[str]:
         except ValueError:
             continue
     return sorted(names)
+
+
+def saved_views_path(data_dir: Path) -> Path:
+    return data_dir / ".zentracker" / "views.json"
+
+
+def read_saved_views(data_dir: Path) -> dict[str, SavedView]:
+    path = saved_views_path(data_dir)
+    if not path.exists():
+        return {}
+
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"invalid saved views file: {path}") from exc
+
+    if not isinstance(payload, dict):
+        raise ValueError("invalid saved views file: expected an object of view definitions.")
+
+    views: dict[str, SavedView] = {}
+    for name, definition in payload.items():
+        if not isinstance(name, str) or not isinstance(definition, dict):
+            raise ValueError("invalid saved views file: expected an object of view definitions.")
+
+        command = definition.get("command")
+        tokens = definition.get("tokens")
+        if not isinstance(command, str) or not isinstance(tokens, list):
+            raise ValueError("invalid saved views file: expected an object of view definitions.")
+        if not all(isinstance(token, str) for token in tokens):
+            raise ValueError("invalid saved views file: expected an object of view definitions.")
+
+        views[name] = {"command": command, "tokens": list(tokens)}
+
+    return views
+
+
+def write_saved_views(data_dir: Path, views: dict[str, SavedView]) -> None:
+    path = saved_views_path(data_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = json.dumps(views, ensure_ascii=False, indent=2, sort_keys=True)
+
+    with tempfile.NamedTemporaryFile(
+        "w",
+        encoding="utf-8",
+        dir=path.parent,
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        delete=False,
+    ) as handle:
+        temp_path = Path(handle.name)
+        handle.write(payload)
+        handle.write("\n")
+        handle.flush()
+
+    temp_path.replace(path)
 
 
 def iter_days(start_date: date, end_date: date) -> list[date]:

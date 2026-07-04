@@ -25,6 +25,7 @@ from zentracker.metrics import (
 )
 from zentracker.storage import (
     Entry,
+    SavedView,
     append_entry,
     iter_days,
     list_metric_names,
@@ -32,7 +33,9 @@ from zentracker.storage import (
     read_metric,
     read_metric_entries,
     read_metric_type,
+    read_saved_views,
     write_metric,
+    write_saved_views,
 )
 
 
@@ -165,6 +168,8 @@ def build_parser() -> argparse.ArgumentParser:
               zt --data-dir /tmp/zentracker-demo demo
               zt list 7 +mood
               zt table 30 +weight +gym +mood
+              zt view save @pessoal table +weight +gym +mood
+              zt view @pessoal
               zt export jsxgraph 30 weight,gym
               zt table from:2026-06-01 to:2026-06-30 +weight +gym
             """
@@ -266,6 +271,27 @@ def build_parser() -> argparse.ArgumentParser:
     )
     table_parser.add_argument("tokens", nargs="*", help="query tokens")
     table_parser.set_defaults(func=handle_table)
+
+    view_parser = subparsers.add_parser(
+        "view",
+        help="save, list, delete, or execute saved read views",
+        description=dedent(
+            """\
+            Save and run reusable list/table presets.
+
+            Shapes:
+              zt view save @pessoal table +academia +peso +humor +banho
+              zt view @pessoal
+              zt view @pessoal 7
+              zt view @pessoal from:2026-07-01 to:2026-07-31
+              zt view list
+              zt view delete @pessoal
+            """
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    view_parser.add_argument("tokens", nargs="*", help="saved view tokens")
+    view_parser.set_defaults(func=handle_view)
 
     metrics_parser = subparsers.add_parser(
         "metrics",
@@ -648,6 +674,148 @@ def handle_table(args: argparse.Namespace) -> int:
 
     print(format_table(["date", *metric_names], rows))
     return 0
+
+
+def handle_view(args: argparse.Namespace) -> int:
+    tokens = args.tokens
+    if not tokens:
+        raise ValueError("view expects save, list, delete, or @name.")
+
+    action = tokens[0]
+    if action == "save":
+        return handle_view_save(args.data_dir, tokens[1:])
+    if action == "list":
+        if len(tokens) != 1:
+            raise ValueError("view list does not accept extra tokens.")
+        return handle_view_list(args.data_dir)
+    if action == "delete":
+        return handle_view_delete(args.data_dir, tokens[1:])
+    if action.startswith("@"):
+        return handle_view_execute(args.data_dir, tokens)
+
+    raise ValueError("view expects save, list, delete, or @name.")
+
+
+def handle_view_save(data_dir: Path, tokens: list[str]) -> int:
+    if len(tokens) < 3:
+        raise ValueError("view save expects @name, table|list, and at least one +metric.")
+
+    view_name = parse_view_ref(tokens[0])
+    command = tokens[1]
+    if command not in {"list", "table"}:
+        raise ValueError("saved views support only list and table.")
+
+    raw_metric_tokens = tokens[2:]
+    if not raw_metric_tokens:
+        raise ValueError("view save expects at least one +metric.")
+    if not all(is_metric_token(token) for token in raw_metric_tokens):
+        raise ValueError("view save accepts only +metric tokens after the command.")
+
+    metric_tokens = [f"+{validate_metric_name(token[1:])}" for token in raw_metric_tokens]
+    views = load_valid_saved_views(data_dir)
+    replaced = view_name in views
+    views[view_name] = {"command": command, "tokens": metric_tokens}
+    write_saved_views(data_dir, views)
+
+    verb = "replaced" if replaced else "saved"
+    print(f"{verb} view @{view_name}: {command} {' '.join(metric_tokens)}")
+    return 0
+
+
+def handle_view_list(data_dir: Path) -> int:
+    views = load_valid_saved_views(data_dir)
+    for name in sorted(views):
+        definition = views[name]
+        print(f"@{name} {definition['command']} {' '.join(definition['tokens'])}")
+    return 0
+
+
+def handle_view_delete(data_dir: Path, tokens: list[str]) -> int:
+    if len(tokens) != 1:
+        raise ValueError("view delete expects exactly one @name.")
+
+    view_name = parse_view_ref(tokens[0])
+    views = load_valid_saved_views(data_dir)
+    if view_name not in views:
+        raise ValueError(f"unknown view: @{view_name}.")
+
+    del views[view_name]
+    write_saved_views(data_dir, views)
+    print(f"deleted view @{view_name}")
+    return 0
+
+
+def handle_view_execute(data_dir: Path, tokens: list[str]) -> int:
+    view_name = parse_view_ref(tokens[0])
+    execution_tokens = tokens[1:]
+    if any(is_metric_token(token) for token in execution_tokens):
+        raise ValueError("saved view metrics cannot be changed at execution time.")
+
+    views = load_valid_saved_views(data_dir)
+    if view_name not in views:
+        raise ValueError(f"unknown view: @{view_name}.")
+
+    definition = views[view_name]
+    range_tokens = execution_tokens or ["30"]
+    expanded_args = argparse.Namespace(
+        data_dir=data_dir,
+        tokens=[*range_tokens, *definition["tokens"]],
+    )
+
+    if definition["command"] == "list":
+        return handle_list(expanded_args)
+    if definition["command"] == "table":
+        return handle_table(expanded_args)
+
+    raise AssertionError(f"validated saved view command missing handler: {definition['command']}")
+
+
+def parse_view_ref(raw_value: str) -> str:
+    if not raw_value.startswith("@"):
+        raise ValueError("view references must start with @.")
+    name = raw_value[1:]
+    if "@" in name:
+        raise ValueError("view name accepts only Unicode letters, numbers, '_' and '-'.")
+    try:
+        return validate_metric_name(name)
+    except ValueError as exc:
+        raise ValueError(str(exc).replace("metric name", "view name", 1)) from exc
+
+
+def load_valid_saved_views(data_dir: Path) -> dict[str, SavedView]:
+    views = read_saved_views(data_dir)
+    normalized_views: dict[str, SavedView] = {}
+    for raw_name, definition in views.items():
+        name = validate_saved_view_name(raw_name)
+        if name != raw_name:
+            raise ValueError("invalid saved views file: expected normalized view names.")
+
+        command = definition["command"]
+        if command not in {"list", "table"}:
+            raise ValueError("invalid saved views file: unsupported command.")
+
+        tokens = definition["tokens"]
+        if not tokens or not all(is_metric_token(token) for token in tokens):
+            raise ValueError("invalid saved views file: expected +metric tokens.")
+
+        normalized_tokens = []
+        for token in tokens:
+            metric_name = validate_metric_name(token[1:])
+            normalized_token = f"+{metric_name}"
+            if normalized_token != token:
+                raise ValueError("invalid saved views file: expected normalized metric tokens.")
+            normalized_tokens.append(normalized_token)
+
+        normalized_views[name] = {"command": command, "tokens": normalized_tokens}
+
+    return normalized_views
+
+
+def validate_saved_view_name(raw_name: str) -> str:
+    try:
+        return validate_metric_name(raw_name)
+    except ValueError as exc:
+        raise ValueError("invalid saved views file: invalid view name.") from exc
 
 
 def resolve_query_args(data_dir: Path, tokens: list[str]) -> QueryRange:

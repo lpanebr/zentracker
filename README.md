@@ -64,6 +64,8 @@ zt add on:2026-06-23 +mood focused
 zt metrics
 zt list 7 +mood
 zt table 30 +weight +gym +mood
+zt view save @pessoal table +weight +gym +mood
+zt view @pessoal
 zt table from:2026-06-01 to:2026-06-30 +weight +gym +mood
 zt export jsxgraph 30 weight,gym
 ```
@@ -161,6 +163,19 @@ Read a daily table:
 zt table 7 +humor +academia
 zt table from:data
 zt table to:data +peso
+```
+
+## Saved Views
+
+Saved views remember a `list` or `table` command plus its metric filters. Date ranges are chosen when the view runs, and `zt view @pessoal` defaults to the last 30 days.
+
+```bash
+zt view save @pessoal table +academia +peso +humor +banho
+zt view @pessoal
+zt view @pessoal 7
+zt view @pessoal from:2026-07-01 to:2026-07-31
+zt view list
+zt view delete @pessoal
 ```
 
 ## Examples
