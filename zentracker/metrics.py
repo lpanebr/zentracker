@@ -1,23 +1,30 @@
 from __future__ import annotations
 
-import re
 from decimal import Decimal, InvalidOperation
+import unicodedata
 
 
 DEFAULT_METRIC_TYPE = "text"
 METRIC_TYPES = ("bool", "integer", "number", "text")
 METRIC_TYPE_PREFIX = "# type:"
 
-_METRIC_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
+def normalize_metric_name(metric_name: str) -> str:
+    return unicodedata.normalize("NFC", metric_name.strip())
 
 
 def validate_metric_name(metric_name: str) -> str:
-    name = metric_name.strip()
+    name = normalize_metric_name(metric_name)
     if not name:
         raise ValueError("metric name cannot be empty.")
-    if not _METRIC_NAME_PATTERN.fullmatch(name):
+    if name.startswith("."):
         raise ValueError(
-            "metric name accepts only letters, numbers, '_' and '-'."
+            "metric name accepts only Unicode letters, numbers, '_' and '-'."
+        )
+    for char in name:
+        if char.isalnum() or char in {"_", "-"}:
+            continue
+        raise ValueError(
+            "metric name accepts only Unicode letters, numbers, '_' and '-'."
         )
     return name
 

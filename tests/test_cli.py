@@ -295,6 +295,156 @@ class ZentrackerCliTest(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertIn("metric name accepts only", result.stderr)
 
+    def test_add_batch_records_multiple_metrics_with_type_inference(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self.run_cli(
+                "--data-dir",
+                temp_dir,
+                "add",
+                "on:2026-07-01",
+                "+peso",
+                "97.5",
+                "+academia",
+                "yes",
+                "+café",
+                "6",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("recorded 3 metrics across 1 date group:", result.stdout)
+            self.assertIn("- 2026-07-01: peso, academia, café", result.stdout)
+            self.assertEqual(
+                (Path(temp_dir) / "peso.txt").read_text(encoding="utf-8"),
+                "# type:number\n2026-07-01 97.5\n",
+            )
+            self.assertEqual(
+                (Path(temp_dir) / "academia.txt").read_text(encoding="utf-8"),
+                "# type:bool\n2026-07-01 yes\n",
+            )
+            self.assertEqual(
+                (Path(temp_dir) / "café.txt").read_text(encoding="utf-8"),
+                "# type:integer\n2026-07-01 6\n",
+            )
+
+    def test_add_batch_supports_unicode_normalization_for_metric_names(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            decomposed_name = "cafe\u0301"
+
+            result = self.run_cli(
+                "--data-dir",
+                temp_dir,
+                "add",
+                "on:2026-07-01",
+                f"+{decomposed_name}",
+                "2",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((Path(temp_dir) / "café.txt").exists())
+            self.assertFalse((Path(temp_dir) / f"{decomposed_name}.txt").exists())
+
+    def test_add_batch_accepts_unquoted_multiword_text_with_explicit_type(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self.run_cli(
+                "--data-dir",
+                temp_dir,
+                "add",
+                "on:2026-07-01",
+                "+humor",
+                "as:text",
+                "muito",
+                "bem",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                (Path(temp_dir) / "humor.txt").read_text(encoding="utf-8"),
+                "# type:text\n2026-07-01 muito bem\n",
+            )
+
+    def test_add_batch_rejects_legacy_flags(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self.run_cli(
+                "--data-dir",
+                temp_dir,
+                "add",
+                "+peso",
+                "97.5",
+                "--date",
+                "2026-07-01",
+            )
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("batch mode does not accept --type or --date", result.stderr)
+
+    def test_add_batch_supports_partial_success_and_duplicate_rejection(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self.run_cli(
+                "--data-dir",
+                temp_dir,
+                "add",
+                "on:2026-07-01",
+                "+peso",
+                "as:number",
+                "abc",
+                "+academia",
+                "yes",
+                "+peso",
+                "97.5",
+                "on:2026-07-02",
+                "+peso",
+                "97.2",
+            )
+
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertIn("recorded 2 metrics across 2 date groups:", result.stdout)
+            self.assertIn("- 2026-07-01: academia", result.stdout)
+            self.assertIn("- 2026-07-02: peso", result.stdout)
+            self.assertIn("skipped 2 metrics:", result.stdout)
+            self.assertEqual(result.stdout.count("repeated in same date group"), 2)
+            self.assertEqual(
+                (Path(temp_dir) / "academia.txt").read_text(encoding="utf-8"),
+                "# type:bool\n2026-07-01 yes\n",
+            )
+            self.assertEqual(
+                (Path(temp_dir) / "peso.txt").read_text(encoding="utf-8"),
+                "# type:number\n2026-07-02 97.2\n",
+            )
+
+    def test_add_batch_rejects_ambiguous_reserved_value_tokens(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self.run_cli(
+                "--data-dir",
+                temp_dir,
+                "add",
+                "+nota",
+                "due:ruim",
+            )
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("ambiguous value for nota", result.stderr)
+
+    def test_add_batch_skips_invalid_metric_and_records_valid_ones(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self.run_cli(
+                "--data-dir",
+                temp_dir,
+                "add",
+                "on:2026-07-01",
+                "+../peso",
+                "92.4",
+                "+ok",
+                "1",
+            )
+
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertIn("- 2026-07-01: ok", result.stdout)
+            self.assertIn("metric name accepts only Unicode letters", result.stdout)
+            self.assertEqual(
+                (Path(temp_dir) / "ok.txt").read_text(encoding="utf-8"),
+                "# type:integer\n2026-07-01 1\n",
+            )
+
     def test_metrics_lists_metric_files_with_data(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir)

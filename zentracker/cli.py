@@ -4,6 +4,8 @@ import argparse
 import json
 import os
 import sys
+from collections import Counter
+from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from importlib.metadata import PackageNotFoundError, version
@@ -13,9 +15,13 @@ from typing import TypedDict
 
 from zentracker.metrics import (
     METRIC_TYPES,
+    DEFAULT_METRIC_TYPE,
+    normalize_metric_name,
+    validate_integer,
     validate_metric_name,
     validate_metric_type,
     validate_metric_value,
+    validate_number,
 )
 from zentracker.storage import (
     Entry,
@@ -32,6 +38,40 @@ from zentracker.storage import (
 class PlotSeries(TypedDict):
     type: str
     points: list[list[float]]
+
+
+DATE_TOKEN_PREFIXES = ("on:", "date:", "due:")
+TYPE_TOKEN_PREFIX = "as:"
+
+
+@dataclass(frozen=True)
+class BatchItem:
+    raw_metric_name: str
+    raw_value: str
+    raw_type_name: str | None = None
+
+
+@dataclass(frozen=True)
+class BatchGroup:
+    raw_date_token: str | None
+    items: list[BatchItem]
+
+
+@dataclass(frozen=True)
+class PendingEntry:
+    group_index: int
+    entry_date: date
+    date_label: str
+    metric_name: str
+    metric_type: str
+    value: str
+
+
+@dataclass(frozen=True)
+class SkippedItem:
+    date_label: str
+    metric_name: str
+    reason: str
 
 
 def package_version() -> str:
@@ -101,6 +141,8 @@ def build_parser() -> argparse.ArgumentParser:
               zt add weight 92.4 --type number
               zt add gym yes --type bool
               zt add mood "focused"
+              zt add +weight 92.4 +gym yes on:2026-07-01
+              zt add +café 6 +mood "muito bem"
               zt metrics
               zt --data-dir /tmp/zentracker-demo demo
               zt table 30 weight,gym,mood
@@ -123,9 +165,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    add_parser = subparsers.add_parser("add", help="add one metric entry")
-    add_parser.add_argument("metric", help="metric name")
-    add_parser.add_argument("value", help="metric value")
+    add_parser = subparsers.add_parser("add", help="add one or more metric entries")
+    add_parser.add_argument("tokens", nargs="*", help="legacy or batch add tokens")
     add_parser.add_argument(
         "--type",
         dest="metric_type",
@@ -136,8 +177,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--date",
         dest="entry_date",
         type=parse_iso_date,
-        default=date.today(),
-        help="entry date in YYYY-MM-DD; default: today",
+        help="entry date in YYYY-MM-DD; legacy mode only; default: today",
     )
     add_parser.set_defaults(func=handle_add)
 
@@ -212,7 +252,18 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def handle_add(args: argparse.Namespace) -> int:
-    metric_name = validate_metric_name(args.metric)
+    if is_batch_mode(args.tokens):
+        return handle_add_batch(args)
+    return handle_add_legacy(args)
+
+
+def handle_add_legacy(args: argparse.Namespace) -> int:
+    if len(args.tokens) != 2:
+        raise ValueError(
+            "legacy add expects METRIC VALUE [--type TYPE] [--date YYYY-MM-DD]."
+        )
+
+    metric_name = validate_metric_name(args.tokens[0])
     metric_type = read_metric_type(args.data_dir, metric_name)
     if args.metric_type is not None:
         requested_type = validate_metric_type(args.metric_type)
@@ -224,10 +275,306 @@ def handle_add(args: argparse.Namespace) -> int:
             )
         metric_type = requested_type
 
-    value = validate_metric_value(metric_type, args.value)
-    append_entry(args.data_dir, metric_name, metric_type, Entry(args.entry_date, value))
-    print(f"recorded: {metric_name} {value} on {args.entry_date.isoformat()}")
+    entry_date = args.entry_date or date.today()
+    value = validate_metric_value(metric_type, args.tokens[1])
+    append_entry(args.data_dir, metric_name, metric_type, Entry(entry_date, value))
+    print(f"recorded: {metric_name} {value} on {entry_date.isoformat()}")
     return 0
+
+
+def handle_add_batch(args: argparse.Namespace) -> int:
+    if args.metric_type is not None or args.entry_date is not None:
+        raise ValueError(
+            "batch mode does not accept --type or --date; use as:type and on:YYYY-MM-DD."
+        )
+
+    groups = parse_batch_groups(args.tokens)
+    recorded, skipped = validate_batch_groups(args.data_dir, groups)
+
+    for entry in recorded:
+        append_entry(
+            args.data_dir,
+            entry.metric_name,
+            entry.metric_type,
+            Entry(entry.entry_date, entry.value),
+        )
+
+    if recorded:
+        print(format_recorded_summary(recorded))
+    if skipped:
+        print(format_skipped_summary(skipped))
+
+    if skipped:
+        return 1
+    return 0
+
+
+def is_batch_mode(tokens: list[str]) -> bool:
+    return any(is_metric_token(token) for token in tokens)
+
+
+def is_metric_token(token: str) -> bool:
+    return token.startswith("+")
+
+
+def is_date_token(token: str) -> bool:
+    return token.startswith(DATE_TOKEN_PREFIXES)
+
+
+def is_type_token(token: str) -> bool:
+    return token.startswith(TYPE_TOKEN_PREFIX)
+
+
+def parse_batch_groups(tokens: list[str]) -> list[BatchGroup]:
+    if not tokens:
+        raise ValueError("no metric items found.")
+
+    groups: list[BatchGroup] = []
+    current_date_token: str | None = None
+    current_items: list[BatchItem] = []
+    current_group_started = False
+    index = 0
+
+    while index < len(tokens):
+        token = tokens[index]
+        if is_date_token(token):
+            if current_group_started:
+                if not current_items:
+                    raise ValueError(f"date group {current_date_token or 'today'} has no metric items.")
+                groups.append(BatchGroup(current_date_token, current_items))
+                current_items = []
+            current_date_token = token
+            current_group_started = True
+            index += 1
+            continue
+
+        if is_type_token(token):
+            raise ValueError(
+                "ambiguous batch syntax; quote tokens like on:, date:, due:, or as: when they are part of the value."
+            )
+
+        if not is_metric_token(token):
+            raise ValueError(
+                f"batch mode expects +metric items and optional on:YYYY-MM-DD groups; got {token!r}."
+            )
+
+        if not current_group_started:
+            current_group_started = True
+
+        raw_metric_name = token[1:]
+        index += 1
+        raw_type_name: str | None = None
+        if index < len(tokens) and is_type_token(tokens[index]):
+            raw_type_name = tokens[index].removeprefix(TYPE_TOKEN_PREFIX)
+            index += 1
+
+        if index < len(tokens) and is_date_token(tokens[index]):
+            raise ValueError(
+                f"ambiguous value for {normalize_metric_label(raw_metric_name)}; "
+                "quote tokens like on:, date:, due:, or as: when they are part of the value."
+            )
+
+        value_parts: list[str] = []
+        while index < len(tokens):
+            current = tokens[index]
+            if is_metric_token(current) or is_date_token(current):
+                break
+            if is_type_token(current):
+                raise ValueError(
+                    f"ambiguous value for {normalize_metric_label(raw_metric_name)}; "
+                    "quote tokens like on:, date:, due:, or as: when they are part of the value."
+                )
+            value_parts.append(current)
+            index += 1
+
+        if not value_parts:
+            raise ValueError(f"missing value for {normalize_metric_label(raw_metric_name)}.")
+
+        current_items.append(BatchItem(raw_metric_name, " ".join(value_parts), raw_type_name))
+
+    if not current_group_started:
+        raise ValueError("no metric items found.")
+    if not current_items:
+        raise ValueError(f"date group {current_date_token or 'today'} has no metric items.")
+
+    groups.append(BatchGroup(current_date_token, current_items))
+    return groups
+
+
+def validate_batch_groups(
+    data_dir: Path,
+    groups: list[BatchGroup],
+) -> tuple[list[PendingEntry], list[SkippedItem]]:
+    recorded: list[PendingEntry] = []
+    skipped: list[SkippedItem] = []
+
+    for group_index, group in enumerate(groups):
+        entry_date, date_label, date_error = resolve_batch_group_date(group.raw_date_token)
+
+        normalized_names: list[str | None] = []
+        for item in group.items:
+            if date_error is not None:
+                normalized_names.append(None)
+                continue
+            try:
+                normalized_names.append(validate_metric_name(item.raw_metric_name))
+            except ValueError:
+                normalized_names.append(None)
+
+        duplicate_names = {
+            metric_name
+            for metric_name, count in Counter(
+                name for name in normalized_names if name is not None
+            ).items()
+            if count > 1
+        }
+
+        for item, metric_name in zip(group.items, normalized_names):
+            metric_label = metric_name or normalize_metric_label(item.raw_metric_name)
+            if date_error is not None:
+                skipped.append(SkippedItem(date_label, metric_label, date_error))
+                continue
+            if metric_name is None:
+                skipped.append(
+                    SkippedItem(
+                        date_label,
+                        metric_label,
+                        "metric name accepts only Unicode letters, numbers, '_' and '-'.",
+                    )
+                )
+                continue
+            if metric_name in duplicate_names:
+                skipped.append(
+                    SkippedItem(date_label, metric_name, "repeated in same date group")
+                )
+                continue
+
+            try:
+                metric_type = resolve_batch_metric_type(
+                    data_dir,
+                    metric_name,
+                    item.raw_type_name,
+                    item.raw_value,
+                )
+                value = validate_metric_value(metric_type, item.raw_value)
+            except ValueError as exc:
+                skipped.append(SkippedItem(date_label, metric_name, str(exc)))
+                continue
+
+            if entry_date is None:
+                raise AssertionError("validated batch group must have a date.")
+            recorded.append(
+                PendingEntry(
+                    group_index=group_index,
+                    entry_date=entry_date,
+                    date_label=date_label,
+                    metric_name=metric_name,
+                    metric_type=metric_type,
+                    value=value,
+                )
+            )
+
+    return recorded, skipped
+
+
+def resolve_batch_group_date(raw_date_token: str | None) -> tuple[date | None, str, str | None]:
+    if raw_date_token is None:
+        today = date.today()
+        return today, today.isoformat(), None
+
+    raw_date = raw_date_token.split(":", maxsplit=1)[1]
+    try:
+        parsed = parse_iso_date(raw_date)
+    except argparse.ArgumentTypeError as exc:
+        return None, raw_date_token, str(exc)
+    return parsed, parsed.isoformat(), None
+
+
+def resolve_batch_metric_type(
+    data_dir: Path,
+    metric_name: str,
+    raw_type_name: str | None,
+    raw_value: str,
+) -> str:
+    existing_type = read_metric_type(data_dir, metric_name)
+    path = metric_path(data_dir, metric_name)
+    existing_file_with_content = path.exists() and path.stat().st_size > 0
+
+    requested_type: str | None = None
+    if raw_type_name is not None:
+        requested_type = validate_metric_type(raw_type_name)
+
+    if existing_file_with_content:
+        if requested_type is not None and requested_type != existing_type:
+            raise ValueError(
+                f"{metric_name} already exists as {existing_type}; do not use as:type to change it."
+            )
+        return existing_type
+
+    if requested_type is not None:
+        return requested_type
+
+    return infer_metric_type(raw_value)
+
+
+def infer_metric_type(raw_value: str) -> str:
+    value = raw_value.strip().lower()
+    if value in {"yes", "no", "true", "false", "sim", "nao"}:
+        return "bool"
+
+    try:
+        validate_integer(raw_value)
+        return "integer"
+    except ValueError:
+        pass
+
+    try:
+        validate_number(raw_value)
+        return "number"
+    except ValueError:
+        pass
+
+    return DEFAULT_METRIC_TYPE
+
+
+def normalize_metric_label(metric_name: str) -> str:
+    normalized = normalize_metric_name(metric_name)
+    return normalized or metric_name.strip() or metric_name
+
+
+def format_recorded_summary(recorded: list[PendingEntry]) -> str:
+    grouped_entries = group_recorded_entries(recorded)
+    lines = [
+        f"recorded {len(recorded)} {pluralize(len(recorded), 'metric')} across "
+        f"{len(grouped_entries)} {pluralize(len(grouped_entries), 'date group')}:"
+    ]
+    for date_label, metric_names in grouped_entries:
+        lines.append(f"- {date_label}: {', '.join(metric_names)}")
+    return "\n".join(lines)
+
+
+def group_recorded_entries(recorded: list[PendingEntry]) -> list[tuple[str, list[str]]]:
+    groups: list[tuple[tuple[int, str], list[str]]] = []
+    for entry in recorded:
+        group_key = (entry.group_index, entry.date_label)
+        if groups and groups[-1][0] == group_key:
+            groups[-1][1].append(entry.metric_name)
+            continue
+        groups.append((group_key, [entry.metric_name]))
+    return [(group_key[1], metric_names) for group_key, metric_names in groups]
+
+
+def format_skipped_summary(skipped: list[SkippedItem]) -> str:
+    lines = [f"skipped {len(skipped)} {pluralize(len(skipped), 'metric')}:"]
+    for item in skipped:
+        lines.append(f"- {item.date_label} {item.metric_name}: {item.reason}")
+    return "\n".join(lines)
+
+
+def pluralize(count: int, noun: str) -> str:
+    if count == 1:
+        return noun
+    return f"{noun}s"
 
 
 def handle_table(args: argparse.Namespace) -> int:
