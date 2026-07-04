@@ -165,7 +165,39 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    add_parser = subparsers.add_parser("add", help="add one or more metric entries")
+    add_parser = subparsers.add_parser(
+        "add",
+        help="add one or more metric entries",
+        description=dedent(
+            """\
+            Add metrics in one of two modes.
+
+            Legacy mode:
+              zt add METRIC VALUE [--type TYPE] [--date YYYY-MM-DD]
+
+            Batch mode:
+              zt add [on:YYYY-MM-DD] +metric [as:type] value... [+metric ...] [on:YYYY-MM-DD ...]
+
+            Batch rules:
+              - batch mode starts when any positional token begins with '+'
+              - use on:, date:, or due: to start a new date group
+              - use as:text, as:number, as:integer, or as:bool right after +metric
+              - --type and --date are legacy-only and are rejected in batch mode
+            """
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=dedent(
+            """\
+            examples:
+              zt add weight 92.4 --type number --date 2026-07-01
+              zt add mood focused --date 2026-07-01
+              zt add +peso 97.5 +academia yes +café 6
+              zt add on:2026-07-01 +peso 97.5 +café 6 on:2026-07-02 +peso 97.2
+              zt add +humor as:text muito bem
+              zt add +nota "due:ruim"
+            """
+        ),
+    )
     add_parser.add_argument("tokens", nargs="*", help="legacy or batch add tokens")
     add_parser.add_argument(
         "--type",
