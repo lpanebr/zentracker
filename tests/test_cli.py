@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import os
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -42,260 +42,7 @@ class ZentrackerCliTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertRegex(result.stdout, r"^zentracker \d+\.\d+\.\d+")
 
-    def test_add_metric_writes_text_metric_file_by_default(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            result = self.run_cli(
-                "--data-dir",
-                temp_dir,
-                "add",
-                "mood",
-                "focused",
-                "--date",
-                "2026-06-23",
-            )
-
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("recorded: mood focused on 2026-06-23", result.stdout)
-            self.assertEqual(
-                (Path(temp_dir) / "mood.txt").read_text(encoding="utf-8"),
-                "# type:text\n2026-06-23 focused\n",
-            )
-
-    def test_add_uses_environment_data_dir_when_data_dir_is_omitted(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            env = os.environ.copy()
-            env["ZENTRACKER_DATA_DIR"] = temp_dir
-
-            result = self.run_cli(
-                "add",
-                "mood",
-                "focused",
-                "--date",
-                "2026-06-23",
-                env=env,
-            )
-
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(
-                (Path(temp_dir) / "mood.txt").read_text(encoding="utf-8"),
-                "# type:text\n2026-06-23 focused\n",
-            )
-
-    def test_table_uses_latest_entry_for_same_day(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            data_dir = Path(temp_dir)
-            (data_dir / "weight.txt").write_text(
-                "2026-06-23 92.4\n2026-06-23 92.1\n",
-                encoding="utf-8",
-            )
-
-            result = self.run_cli(
-                "--data-dir",
-                temp_dir,
-                "table",
-                "--from",
-                "2026-06-23",
-                "--to",
-                "2026-06-23",
-                "--metrics",
-                "weight",
-            )
-
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("2026-06-23  92.1", result.stdout)
-
-    def test_table_combines_metrics_and_marks_missing_data(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            data_dir = Path(temp_dir)
-            (data_dir / "weight.txt").write_text(
-                "2026-06-20 92.4\n2026-06-21 92.1\n",
-                encoding="utf-8",
-            )
-            (data_dir / "gym.txt").write_text(
-                "2026-06-20 yes\n2026-06-21 no\n2026-06-22 yes\n",
-                encoding="utf-8",
-            )
-
-            result = self.run_cli(
-                "--data-dir",
-                temp_dir,
-                "table",
-                "--from",
-                "2026-06-20",
-                "--to",
-                "2026-06-22",
-                "--metrics",
-                "weight,gym",
-            )
-
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(
-                result.stdout.strip().splitlines(),
-                [
-                    "date        weight  gym",
-                    "2026-06-20  92.4    yes",
-                    "2026-06-21  92.1    no",
-                    "2026-06-22  -       yes",
-                ],
-            )
-
-    def test_table_accepts_days_and_metrics_shorthand(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            today = date.today()
-            yesterday = today - timedelta(days=1)
-            data_dir = Path(temp_dir)
-            (data_dir / "weight.txt").write_text(
-                f"{yesterday.isoformat()} 92.4\n{today.isoformat()} 92.1\n",
-                encoding="utf-8",
-            )
-            (data_dir / "gym.txt").write_text(
-                f"{today.isoformat()} yes\n",
-                encoding="utf-8",
-            )
-
-            result = self.run_cli(
-                "--data-dir",
-                temp_dir,
-                "table",
-                "2",
-                "weight,gym",
-            )
-
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(
-                result.stdout.strip().splitlines(),
-                [
-                    "date        weight  gym",
-                    f"{yesterday.isoformat()}  92.4    -",
-                    f"{today.isoformat()}  92.1    yes",
-                ],
-            )
-
-    def test_table_rejects_mixed_shorthand_and_explicit_period(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            result = self.run_cli(
-                "--data-dir",
-                temp_dir,
-                "table",
-                "30",
-                "weight",
-                "--from",
-                "2026-06-01",
-                "--to",
-                "2026-06-30",
-                "--metrics",
-                "weight",
-            )
-
-            self.assertEqual(result.returncode, 2)
-            self.assertIn("do not mix table DAYS METRICS", result.stderr)
-
-    def test_add_bool_metric_normalizes_value(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            result = self.run_cli(
-                "--data-dir",
-                temp_dir,
-                "add",
-                "gym",
-                "true",
-                "--type",
-                "bool",
-                "--date",
-                "2026-06-23",
-            )
-
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(
-                (Path(temp_dir) / "gym.txt").read_text(encoding="utf-8"),
-                "# type:bool\n2026-06-23 yes\n",
-            )
-
-    def test_add_bool_metric_accepts_legacy_sim_nao_aliases(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            result = self.run_cli(
-                "--data-dir",
-                temp_dir,
-                "add",
-                "gym",
-                "sim",
-                "--type",
-                "bool",
-                "--date",
-                "2026-06-23",
-            )
-
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(
-                (Path(temp_dir) / "gym.txt").read_text(encoding="utf-8"),
-                "# type:bool\n2026-06-23 yes\n",
-            )
-
-    def test_add_bool_metric_rejects_invalid_value(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            result = self.run_cli(
-                "--data-dir",
-                temp_dir,
-                "add",
-                "gym",
-                "maybe",
-                "--type",
-                "bool",
-            )
-
-            self.assertEqual(result.returncode, 2)
-            self.assertIn("bool accepts only yes/no, true/false, or 1/0.", result.stderr)
-
-    def test_add_number_metric_rejects_non_numeric_value_after_header_exists(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            data_dir = Path(temp_dir)
-            (data_dir / "weight.txt").write_text("# type:number\n", encoding="utf-8")
-
-            result = self.run_cli("--data-dir", temp_dir, "add", "weight", "abc")
-
-            self.assertEqual(result.returncode, 2)
-            self.assertIn("number requires a numeric value.", result.stderr)
-
-    def test_add_rejects_type_change_for_existing_metric_file(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            data_dir = Path(temp_dir)
-            (data_dir / "weight.txt").write_text("# type:number\n", encoding="utf-8")
-
-            result = self.run_cli(
-                "--data-dir",
-                temp_dir,
-                "add",
-                "weight",
-                "92",
-                "--type",
-                "integer",
-            )
-
-            self.assertEqual(result.returncode, 2)
-            self.assertIn("weight already exists as number", result.stderr)
-
-    def test_add_integer_metric_rejects_decimal_value(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            result = self.run_cli(
-                "--data-dir",
-                temp_dir,
-                "add",
-                "water-cups",
-                "1.5",
-                "--type",
-                "integer",
-            )
-
-            self.assertEqual(result.returncode, 2)
-            self.assertIn("integer requires a whole number.", result.stderr)
-
-    def test_add_rejects_invalid_metric_name(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            result = self.run_cli("--data-dir", temp_dir, "add", "../weight", "92.4")
-
-            self.assertEqual(result.returncode, 2)
-            self.assertIn("metric name accepts only", result.stderr)
-
-    def test_add_batch_records_multiple_metrics_with_type_inference(self) -> None:
+    def test_add_records_multiple_metrics_with_type_inference(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             result = self.run_cli(
                 "--data-dir",
@@ -326,7 +73,41 @@ class ZentrackerCliTest(unittest.TestCase):
                 "# type:integer\n2026-07-01 6\n",
             )
 
-    def test_add_batch_supports_unicode_normalization_for_metric_names(self) -> None:
+    def test_add_uses_environment_data_dir_when_data_dir_is_omitted(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env = os.environ.copy()
+            env["ZENTRACKER_DATA_DIR"] = temp_dir
+
+            result = self.run_cli(
+                "add",
+                "on:2026-06-23",
+                "+mood",
+                "focused",
+                env=env,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                (Path(temp_dir) / "mood.txt").read_text(encoding="utf-8"),
+                "# type:text\n2026-06-23 focused\n",
+            )
+
+    def test_add_removes_legacy_metric_value_flags_form(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self.run_cli(
+                "--data-dir",
+                temp_dir,
+                "add",
+                "mood",
+                "focused",
+                "--date",
+                "2026-06-23",
+            )
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("unrecognized arguments: --date", result.stderr)
+
+    def test_add_supports_unicode_normalization_for_metric_names(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             decomposed_name = "cafe\u0301"
 
@@ -343,7 +124,7 @@ class ZentrackerCliTest(unittest.TestCase):
             self.assertTrue((Path(temp_dir) / "café.txt").exists())
             self.assertFalse((Path(temp_dir) / f"{decomposed_name}.txt").exists())
 
-    def test_add_batch_accepts_unquoted_multiword_text_with_explicit_type(self) -> None:
+    def test_add_accepts_unquoted_multiword_text_with_explicit_type(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             result = self.run_cli(
                 "--data-dir",
@@ -362,22 +143,45 @@ class ZentrackerCliTest(unittest.TestCase):
                 "# type:text\n2026-07-01 muito bem\n",
             )
 
-    def test_add_batch_rejects_legacy_flags(self) -> None:
+    def test_add_rejects_type_change_for_existing_metric_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "weight.txt").write_text("# type:number\n", encoding="utf-8")
+
+            result = self.run_cli(
+                "--data-dir",
+                temp_dir,
+                "add",
+                "+weight",
+                "as:integer",
+                "92",
+            )
+
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("weight already exists as number", result.stdout)
+
+    def test_add_integer_metric_rejects_decimal_value(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             result = self.run_cli(
                 "--data-dir",
                 temp_dir,
                 "add",
-                "+peso",
-                "97.5",
-                "--date",
-                "2026-07-01",
+                "+water-cups",
+                "as:integer",
+                "1.5",
             )
 
-            self.assertEqual(result.returncode, 2)
-            self.assertIn("batch mode does not accept --type or --date", result.stderr)
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("integer requires a whole number.", result.stdout)
 
-    def test_add_batch_supports_partial_success_and_duplicate_rejection(self) -> None:
+    def test_add_rejects_invalid_metric_name(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self.run_cli("--data-dir", temp_dir, "add", "+../weight", "92.4")
+
+            self.assertEqual(result.returncode, 1)
+            self.assertIn("metric name accepts only", result.stdout)
+
+    def test_add_supports_partial_success_and_duplicate_rejection(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             result = self.run_cli(
                 "--data-dir",
@@ -411,7 +215,22 @@ class ZentrackerCliTest(unittest.TestCase):
                 "# type:number\n2026-07-02 97.2\n",
             )
 
-    def test_add_batch_rejects_ambiguous_reserved_value_tokens(self) -> None:
+    def test_add_parse_errors_record_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self.run_cli(
+                "--data-dir",
+                temp_dir,
+                "add",
+                "+peso",
+                "97.5",
+                "on:2026-07-01",
+            )
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("date group on:2026-07-01 has no metric items", result.stderr)
+            self.assertFalse((Path(temp_dir) / "peso.txt").exists())
+
+    def test_add_rejects_ambiguous_reserved_value_tokens(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             result = self.run_cli(
                 "--data-dir",
@@ -424,26 +243,209 @@ class ZentrackerCliTest(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertIn("ambiguous value for nota", result.stderr)
 
-    def test_add_batch_skips_invalid_metric_and_records_valid_ones(self) -> None:
+    def test_list_shows_raw_entries_and_preserves_same_day_repeats(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "humor.txt").write_text(
+                "# type:text\n2026-07-01 bom\n2026-07-01 otimo\n",
+                encoding="utf-8",
+            )
+            (data_dir / "peso.txt").write_text(
+                "# type:number\n2026-07-01 97.5\n2026-07-02 97.2\n",
+                encoding="utf-8",
+            )
+
+            result = self.run_cli("--data-dir", temp_dir, "list", "from:data", "to:data")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout.strip().splitlines(),
+                [
+                    "2026-07-01 humor bom",
+                    "2026-07-01 humor otimo",
+                    "2026-07-01 peso 97.5",
+                    "2026-07-02 peso 97.2",
+                ],
+            )
+
+    def test_list_accepts_days_and_metric_filters(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            today = date.today()
+            yesterday = today - timedelta(days=1)
+            data_dir = Path(temp_dir)
+            (data_dir / "humor.txt").write_text(
+                f"{yesterday.isoformat()} bom\n{today.isoformat()} otimo\n",
+                encoding="utf-8",
+            )
+            (data_dir / "peso.txt").write_text(
+                f"{today.isoformat()} 97.5\n",
+                encoding="utf-8",
+            )
+
+            result = self.run_cli("--data-dir", temp_dir, "list", "2", "+humor")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout.strip().splitlines(),
+                [
+                    f"{yesterday.isoformat()} humor bom",
+                    f"{today.isoformat()} humor otimo",
+                ],
+            )
+
+    def test_table_uses_latest_entry_for_same_day(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "weight.txt").write_text(
+                "2026-06-23 92.4\n2026-06-23 92.1\n",
+                encoding="utf-8",
+            )
+
+            result = self.run_cli(
+                "--data-dir",
+                temp_dir,
+                "table",
+                "from:2026-06-23",
+                "to:2026-06-23",
+                "+weight",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("2026-06-23  92.1", result.stdout)
+
+    def test_table_combines_metrics_and_marks_missing_data(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "weight.txt").write_text(
+                "2026-06-20 92.4\n2026-06-21 92.1\n",
+                encoding="utf-8",
+            )
+            (data_dir / "gym.txt").write_text(
+                "2026-06-20 yes\n2026-06-21 no\n2026-06-22 yes\n",
+                encoding="utf-8",
+            )
+
+            result = self.run_cli(
+                "--data-dir",
+                temp_dir,
+                "table",
+                "from:2026-06-20",
+                "to:2026-06-22",
+                "+weight",
+                "+gym",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout.strip().splitlines(),
+                [
+                    "date        weight  gym",
+                    "2026-06-20  92.4    yes",
+                    "2026-06-21  92.1    no",
+                    "2026-06-22  -       yes",
+                ],
+            )
+
+    def test_table_accepts_days_and_metric_tokens(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            today = date.today()
+            yesterday = today - timedelta(days=1)
+            data_dir = Path(temp_dir)
+            (data_dir / "weight.txt").write_text(
+                f"{yesterday.isoformat()} 92.4\n{today.isoformat()} 92.1\n",
+                encoding="utf-8",
+            )
+            (data_dir / "gym.txt").write_text(
+                f"{today.isoformat()} yes\n",
+                encoding="utf-8",
+            )
+
+            result = self.run_cli(
+                "--data-dir",
+                temp_dir,
+                "table",
+                "2",
+                "+weight",
+                "+gym",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout.strip().splitlines(),
+                [
+                    "date        weight  gym",
+                    f"{yesterday.isoformat()}  92.4    -",
+                    f"{today.isoformat()}  92.1    yes",
+                ],
+            )
+
+    def test_table_defaults_to_all_metrics_with_data_and_data_bounds(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "weight.txt").write_text("2026-06-20 92.4\n", encoding="utf-8")
+            (data_dir / "gym.txt").write_text("2026-06-22 yes\n", encoding="utf-8")
+            (data_dir / "empty.txt").write_text("# type:text\n", encoding="utf-8")
+
+            result = self.run_cli("--data-dir", temp_dir, "table", "from:data", "to:data")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout.strip().splitlines(),
+                [
+                    "date        gym  weight",
+                    "2026-06-20  -    92.4",
+                    "2026-06-21  -    -",
+                    "2026-06-22  yes  -",
+                ],
+            )
+
+    def test_query_data_bounds_respect_filtered_metric_set(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "weight.txt").write_text(
+                "2026-06-20 92.4\n2026-06-21 92.1\n",
+                encoding="utf-8",
+            )
+            (data_dir / "gym.txt").write_text("2026-06-22 yes\n", encoding="utf-8")
+
+            result = self.run_cli("--data-dir", temp_dir, "table", "from:data", "to:data", "+gym")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout.strip().splitlines(),
+                [
+                    "date        gym",
+                    "2026-06-22  yes",
+                ],
+            )
+
+    def test_query_with_empty_filtered_dataset_prints_nothing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self.run_cli("--data-dir", temp_dir, "list", "from:data", "+missing")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout, "")
+
+    def test_query_rejects_mixed_days_and_explicit_range(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             result = self.run_cli(
                 "--data-dir",
                 temp_dir,
-                "add",
-                "on:2026-07-01",
-                "+../peso",
-                "92.4",
-                "+ok",
-                "1",
+                "table",
+                "30",
+                "from:2026-06-01",
+                "+weight",
             )
 
-            self.assertEqual(result.returncode, 1, result.stderr)
-            self.assertIn("- 2026-07-01: ok", result.stdout)
-            self.assertIn("metric name accepts only Unicode letters", result.stdout)
-            self.assertEqual(
-                (Path(temp_dir) / "ok.txt").read_text(encoding="utf-8"),
-                "# type:integer\n2026-07-01 1\n",
-            )
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("DIAS cannot be combined with from: or to:", result.stderr)
+
+    def test_query_rejects_invalid_metric_token(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self.run_cli("--data-dir", temp_dir, "table", "+../weight")
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("metric name accepts only", result.stderr)
 
     def test_metrics_lists_metric_files_with_data(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -465,7 +467,7 @@ class ZentrackerCliTest(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("generated 3 days of demo data: weight, gym, mood", result.stdout)
-            self.assertIn("table 3 weight,gym,mood", result.stdout)
+            self.assertIn("table 3 +weight +gym +mood", result.stdout)
             self.assertEqual(
                 (Path(temp_dir) / "weight.txt").read_text(encoding="utf-8").splitlines()[0],
                 "# type:number",
@@ -483,7 +485,7 @@ class ZentrackerCliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             self.run_cli("--data-dir", temp_dir, "demo", "--days", "2")
 
-            result = self.run_cli("--data-dir", temp_dir, "table", "2", "weight,gym,mood")
+            result = self.run_cli("--data-dir", temp_dir, "table", "2", "+weight", "+gym", "+mood")
 
             self.assertEqual(result.returncode, 0, result.stderr)
             lines = result.stdout.strip().splitlines()

@@ -52,26 +52,26 @@ Generate sample data relative to today:
 
 ```bash
 zt --data-dir /tmp/zentracker-demo demo
-zt --data-dir /tmp/zentracker-demo table 30 weight,gym,mood
+zt --data-dir /tmp/zentracker-demo table 30 +weight +gym +mood
 ```
 
 Or start tracking your own metrics:
 
 ```bash
-zt add weight 92.4 --type number --date 2026-06-23
-zt add gym yes --type bool --date 2026-06-23
-zt add mood "focused" --date 2026-06-23
+zt add on:2026-06-23 +weight as:number 92.4 +gym as:bool yes
+zt add on:2026-06-23 +mood focused
 
 zt metrics
-zt table 30 weight,gym,mood
-zt table --from 2026-06-01 --to 2026-06-30 --metrics weight,gym,mood
+zt list 7 +mood
+zt table 30 +weight +gym +mood
+zt table from:2026-06-01 to:2026-06-30 +weight +gym +mood
 zt export jsxgraph 30 weight,gym
 ```
 
 The short `table` form shows the last N days, including today:
 
 ```bash
-zt table 30 weight,gym
+zt table 30 +weight +gym
 ```
 
 ## Data Location
@@ -128,6 +128,41 @@ Supported types:
 
 Multiple entries for the same date are allowed. When reading tables, ZenTracker uses the last entry for that date.
 
+## CLI Grammar
+
+ZenTracker uses a compact token grammar for recording and reading metrics:
+
+- `+metric` selects or records a metric;
+- `on:YYYY-MM-DD` starts an exact-date group in `zt add`;
+- `from:YYYY-MM-DD`, `to:YYYY-MM-DD`, `from:data`, and `to:data` select read ranges;
+- `as:text`, `as:number`, `as:integer`, and `as:bool` declare a new metric type in `zt add`;
+- `DIAS` in `zt list` and `zt table` means the last N days including today.
+
+Add one or more metrics:
+
+```bash
+zt add +humor bom
+zt add on:2026-07-01 +peso 97.5 +café 6
+zt add on:2026-07-01 +peso 97.5 on:2026-07-02 +peso 97.2
+zt add +humor as:text muito bem +energia baixa
+```
+
+Read raw entries:
+
+```bash
+zt list 7
+zt list from:data +humor
+zt list from:2026-07-01 to:2026-07-31 +peso +café
+```
+
+Read a daily table:
+
+```bash
+zt table 7 +humor +academia
+zt table from:data
+zt table to:data +peso
+```
+
 ## Examples
 
 Listing metrics with data:
@@ -149,7 +184,7 @@ date        weight  gym  mood
 
 Sample files live in [examples/](examples/).
 
-For a more useful live demo, use `zt demo`; it generates sample data for the last 30 days relative to the current date, so `zt table 30 weight,gym,mood` immediately shows populated rows.
+For a more useful live demo, use `zt demo`; it generates sample data for the last 30 days relative to the current date, so `zt table 30 +weight +gym +mood` immediately shows populated rows.
 
 ## ZenNotes And JSXGraph
 

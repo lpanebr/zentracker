@@ -61,11 +61,19 @@ def read_metric_type(data_dir: Path, metric_name: str) -> str:
 
 
 def read_metric(data_dir: Path, metric_name: str) -> dict[date, str]:
+    latest_by_date: dict[date, str] = {}
+    for entry in read_metric_entries(data_dir, metric_name):
+        latest_by_date[entry.entry_date] = entry.value
+
+    return latest_by_date
+
+
+def read_metric_entries(data_dir: Path, metric_name: str) -> list[Entry]:
     path = metric_path(data_dir, metric_name)
     if not path.exists():
-        return {}
+        return []
 
-    latest_by_date: dict[date, str] = {}
+    entries: list[Entry] = []
     with path.open("r", encoding="utf-8") as handle:
         for index, raw_line in enumerate(handle):
             line = raw_line.strip()
@@ -79,9 +87,9 @@ def read_metric(data_dir: Path, metric_name: str) -> dict[date, str]:
                 raise ValueError(f"invalid line in {path}: {raw_line.rstrip()}")
 
             raw_date, value = parts
-            latest_by_date[date.fromisoformat(raw_date)] = value
+            entries.append(Entry(date.fromisoformat(raw_date), value))
 
-    return latest_by_date
+    return entries
 
 
 def list_metric_names(data_dir: Path) -> list[str]:

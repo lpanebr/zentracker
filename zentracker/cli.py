@@ -30,6 +30,7 @@ from zentracker.storage import (
     list_metric_names,
     metric_path,
     read_metric,
+    read_metric_entries,
     read_metric_type,
     write_metric,
 )
@@ -40,8 +41,18 @@ class PlotSeries(TypedDict):
     points: list[list[float]]
 
 
-DATE_TOKEN_PREFIXES = ("on:", "date:", "due:")
+DATE_TOKEN_PREFIX = "on:"
+FROM_TOKEN_PREFIX = "from:"
+TO_TOKEN_PREFIX = "to:"
 TYPE_TOKEN_PREFIX = "as:"
+RESERVED_VALUE_PREFIXES = (
+    DATE_TOKEN_PREFIX,
+    FROM_TOKEN_PREFIX,
+    TO_TOKEN_PREFIX,
+    TYPE_TOKEN_PREFIX,
+    "date:",
+    "due:",
+)
 
 
 @dataclass(frozen=True)
@@ -72,6 +83,13 @@ class SkippedItem:
     date_label: str
     metric_name: str
     reason: str
+
+
+@dataclass(frozen=True)
+class QueryRange:
+    start_date: date | None
+    end_date: date | None
+    metric_names: list[str]
 
 
 def package_version() -> str:
@@ -138,16 +156,17 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=dedent(
             """\
             examples:
-              zt add weight 92.4 --type number
-              zt add gym yes --type bool
-              zt add mood "focused"
-              zt add +weight 92.4 +gym yes on:2026-07-01
-              zt add +café 6 +mood "muito bem"
+              zt add +weight as:number 92.4
+              zt add +gym as:bool yes
+              zt add +mood focused
+              zt add on:2026-07-01 +weight 92.4 +gym yes
+              zt add +café 6 +mood muito bem
               zt metrics
               zt --data-dir /tmp/zentracker-demo demo
-              zt table 30 weight,gym,mood
+              zt list 7 +mood
+              zt table 30 +weight +gym +mood
               zt export jsxgraph 30 weight,gym
-              zt table --from 2026-06-01 --to 2026-06-30 --metrics weight,gym
+              zt table from:2026-06-01 to:2026-06-30 +weight +gym
             """
         ),
     )
@@ -170,67 +189,82 @@ def build_parser() -> argparse.ArgumentParser:
         help="add one or more metric entries",
         description=dedent(
             """\
-            Add metrics in one of two modes.
+            Add one or more metric items across one or more date groups.
 
-            Legacy mode:
-              zt add METRIC VALUE [--type TYPE] [--date YYYY-MM-DD]
-
-            Batch mode:
+            Shape:
               zt add [on:YYYY-MM-DD] +metric [as:type] value... [+metric ...] [on:YYYY-MM-DD ...]
 
-            Batch rules:
-              - batch mode starts when any positional token begins with '+'
-              - use on:, date:, or due: to start a new date group
-              - use as:text, as:number, as:integer, or as:bool right after +metric
-              - --type and --date are legacy-only and are rejected in batch mode
+            Rules:
+              - use +metric to start each metric item
+              - use on:YYYY-MM-DD to start a new date group
+              - use as:text, as:number, as:integer, or as:bool immediately after +metric
+              - without on:, entries are recorded for today
             """
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=dedent(
             """\
             examples:
-              zt add weight 92.4 --type number --date 2026-07-01
-              zt add mood focused --date 2026-07-01
               zt add +peso 97.5 +academia yes +café 6
               zt add on:2026-07-01 +peso 97.5 +café 6 on:2026-07-02 +peso 97.2
               zt add +humor as:text muito bem
-              zt add +nota "due:ruim"
             """
         ),
     )
-    add_parser.add_argument("tokens", nargs="*", help="legacy or batch add tokens")
-    add_parser.add_argument(
-        "--type",
-        dest="metric_type",
-        choices=METRIC_TYPES,
-        help="metric type when creating a new file; default: text",
-    )
-    add_parser.add_argument(
-        "--date",
-        dest="entry_date",
-        type=parse_iso_date,
-        help="entry date in YYYY-MM-DD; legacy mode only; default: today",
-    )
+    add_parser.add_argument("tokens", nargs="*", help="unified add tokens")
     add_parser.set_defaults(func=handle_add)
 
-    table_parser = subparsers.add_parser("table", help="show a table for a date range")
-    table_parser.add_argument(
-        "days",
-        nargs="?",
-        type=parse_positive_int,
-        help="number of days through today, for example: 30",
+    list_parser = subparsers.add_parser(
+        "list",
+        help="show raw entries in chronological order",
+        description=dedent(
+            """\
+            Show raw entries in chronological order.
+
+            Shapes:
+              zt list DIAS [ +metric ... ]
+              zt list [from:YYYY-MM-DD|from:data] [to:YYYY-MM-DD|to:data] [ +metric ... ]
+            """
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=dedent(
+            """\
+            examples:
+              zt list 7
+              zt list 7 +humor
+              zt list from:data +humor +academia
+              zt list from:2026-07-01 to:2026-07-31 +peso +café
+            """
+        ),
     )
-    table_parser.add_argument(
-        "metrics_arg",
-        nargs="?",
-        help="comma-separated metric list, for example: weight,gym",
+    list_parser.add_argument("tokens", nargs="*", help="query tokens")
+    list_parser.set_defaults(func=handle_list)
+
+    table_parser = subparsers.add_parser(
+        "table",
+        help="show a table for a date range",
+        description=dedent(
+            """\
+            Show one row per day. Repeated same-day entries use the last value.
+
+            Shapes:
+              zt table DIAS [ +metric ... ]
+              zt table [from:YYYY-MM-DD|from:data] [to:YYYY-MM-DD|to:data] [ +metric ... ]
+            """
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=dedent(
+            """\
+            examples:
+              zt table 7
+              zt table 7 +humor +academia
+              zt table from:data
+              zt table to:data +peso
+              zt table from:2026-07-01 to:2026-07-31 +peso +café
+            """
+        ),
     )
-    table_parser.add_argument("--from", dest="start_date", type=parse_iso_date)
-    table_parser.add_argument("--to", dest="end_date", type=parse_iso_date)
-    table_parser.add_argument(
-        "--metrics",
-        help="comma-separated metric list, for example: weight,gym",
-    )
+    table_parser.add_argument("tokens", nargs="*", help="query tokens")
     table_parser.set_defaults(func=handle_table)
 
     metrics_parser = subparsers.add_parser(
@@ -284,42 +318,6 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def handle_add(args: argparse.Namespace) -> int:
-    if is_batch_mode(args.tokens):
-        return handle_add_batch(args)
-    return handle_add_legacy(args)
-
-
-def handle_add_legacy(args: argparse.Namespace) -> int:
-    if len(args.tokens) != 2:
-        raise ValueError(
-            "legacy add expects METRIC VALUE [--type TYPE] [--date YYYY-MM-DD]."
-        )
-
-    metric_name = validate_metric_name(args.tokens[0])
-    metric_type = read_metric_type(args.data_dir, metric_name)
-    if args.metric_type is not None:
-        requested_type = validate_metric_type(args.metric_type)
-        path = metric_path(args.data_dir, metric_name)
-        existing_file_with_content = path.exists() and path.stat().st_size > 0
-        if existing_file_with_content and requested_type != metric_type:
-            raise ValueError(
-                f"{metric_name} already exists as {metric_type}; do not use --type to change it."
-            )
-        metric_type = requested_type
-
-    entry_date = args.entry_date or date.today()
-    value = validate_metric_value(metric_type, args.tokens[1])
-    append_entry(args.data_dir, metric_name, metric_type, Entry(entry_date, value))
-    print(f"recorded: {metric_name} {value} on {entry_date.isoformat()}")
-    return 0
-
-
-def handle_add_batch(args: argparse.Namespace) -> int:
-    if args.metric_type is not None or args.entry_date is not None:
-        raise ValueError(
-            "batch mode does not accept --type or --date; use as:type and on:YYYY-MM-DD."
-        )
-
     groups = parse_batch_groups(args.tokens)
     recorded, skipped = validate_batch_groups(args.data_dir, groups)
 
@@ -341,20 +339,20 @@ def handle_add_batch(args: argparse.Namespace) -> int:
     return 0
 
 
-def is_batch_mode(tokens: list[str]) -> bool:
-    return any(is_metric_token(token) for token in tokens)
-
-
 def is_metric_token(token: str) -> bool:
     return token.startswith("+")
 
 
 def is_date_token(token: str) -> bool:
-    return token.startswith(DATE_TOKEN_PREFIXES)
+    return token.startswith(DATE_TOKEN_PREFIX)
 
 
 def is_type_token(token: str) -> bool:
     return token.startswith(TYPE_TOKEN_PREFIX)
+
+
+def is_reserved_value_token(token: str) -> bool:
+    return token.startswith(RESERVED_VALUE_PREFIXES)
 
 
 def parse_batch_groups(tokens: list[str]) -> list[BatchGroup]:
@@ -382,12 +380,12 @@ def parse_batch_groups(tokens: list[str]) -> list[BatchGroup]:
 
         if is_type_token(token):
             raise ValueError(
-                "ambiguous batch syntax; quote tokens like on:, date:, due:, or as: when they are part of the value."
+                "ambiguous add syntax; quote tokens like on: or as: when they are part of the value."
             )
 
         if not is_metric_token(token):
             raise ValueError(
-                f"batch mode expects +metric items and optional on:YYYY-MM-DD groups; got {token!r}."
+                f"add expects +metric items and optional on:YYYY-MM-DD groups; got {token!r}."
             )
 
         if not current_group_started:
@@ -400,10 +398,10 @@ def parse_batch_groups(tokens: list[str]) -> list[BatchGroup]:
             raw_type_name = tokens[index].removeprefix(TYPE_TOKEN_PREFIX)
             index += 1
 
-        if index < len(tokens) and is_date_token(tokens[index]):
+        if index < len(tokens) and is_reserved_value_token(tokens[index]):
             raise ValueError(
                 f"ambiguous value for {normalize_metric_label(raw_metric_name)}; "
-                "quote tokens like on:, date:, due:, or as: when they are part of the value."
+                "quote tokens like on: or as: when they are part of the value."
             )
 
         value_parts: list[str] = []
@@ -411,10 +409,10 @@ def parse_batch_groups(tokens: list[str]) -> list[BatchGroup]:
             current = tokens[index]
             if is_metric_token(current) or is_date_token(current):
                 break
-            if is_type_token(current):
+            if is_reserved_value_token(current):
                 raise ValueError(
                     f"ambiguous value for {normalize_metric_label(raw_metric_name)}; "
-                    "quote tokens like on:, date:, due:, or as: when they are part of the value."
+                    "quote tokens like on: or as: when they are part of the value."
                 )
             value_parts.append(current)
             index += 1
@@ -609,19 +607,40 @@ def pluralize(count: int, noun: str) -> str:
     return f"{noun}s"
 
 
+def handle_list(args: argparse.Namespace) -> int:
+    query = resolve_query_args(args.data_dir, args.tokens)
+    if query.start_date is None or query.end_date is None or not query.metric_names:
+        return 0
+
+    rows: list[tuple[date, int, int, str, str]] = []
+    for metric_index, metric_name in enumerate(query.metric_names):
+        for entry_index, entry in enumerate(read_metric_entries(args.data_dir, metric_name)):
+            if query.start_date <= entry.entry_date <= query.end_date:
+                rows.append(
+                    (
+                        entry.entry_date,
+                        metric_index,
+                        entry_index,
+                        metric_name,
+                        entry.value,
+                    )
+                )
+
+    for entry_date, _, _, metric_name, value in sorted(rows):
+        print(f"{entry_date.isoformat()} {metric_name} {value}")
+
+    return 0
+
+
 def handle_table(args: argparse.Namespace) -> int:
-    start_date, end_date, raw_metrics = resolve_table_args(args)
+    query = resolve_query_args(args.data_dir, args.tokens)
+    if query.start_date is None or query.end_date is None:
+        return 0
 
-    metric_names = [item.strip() for item in raw_metrics.split(",") if item.strip()]
-    if not metric_names:
-        raise ValueError("provide at least one metric.")
-
-    for metric_name in metric_names:
-        validate_metric_name(metric_name)
-
+    metric_names = query.metric_names
     datasets = {metric_name: read_metric(args.data_dir, metric_name) for metric_name in metric_names}
     rows: list[list[str]] = []
-    for current_day in iter_days(start_date, end_date):
+    for current_day in iter_days(query.start_date, query.end_date):
         row = [current_day.isoformat()]
         for metric_name in metric_names:
             row.append(datasets[metric_name].get(current_day, "-"))
@@ -631,12 +650,100 @@ def handle_table(args: argparse.Namespace) -> int:
     return 0
 
 
-def resolve_table_args(args: argparse.Namespace) -> tuple[date, date, str]:
+def resolve_query_args(data_dir: Path, tokens: list[str]) -> QueryRange:
+    days: int | None = None
+    raw_start: str | None = None
+    raw_end: str | None = None
+    metric_names: list[str] = []
+
+    for token in tokens:
+        if token.isdecimal():
+            if days is not None:
+                raise ValueError("provide DIAS only once.")
+            try:
+                days = parse_positive_int(token)
+            except argparse.ArgumentTypeError as exc:
+                raise ValueError(str(exc)) from exc
+            continue
+
+        if token.startswith(FROM_TOKEN_PREFIX):
+            if raw_start is not None:
+                raise ValueError("provide from: only once.")
+            raw_start = token.removeprefix(FROM_TOKEN_PREFIX)
+            continue
+
+        if token.startswith(TO_TOKEN_PREFIX):
+            if raw_end is not None:
+                raise ValueError("provide to: only once.")
+            raw_end = token.removeprefix(TO_TOKEN_PREFIX)
+            continue
+
+        if is_metric_token(token):
+            metric_names.append(validate_metric_name(token[1:]))
+            continue
+
+        raise ValueError(
+            f"invalid query token: {token!r}. Use DIAS, from:YYYY-MM-DD, to:YYYY-MM-DD, or +metric."
+        )
+
+    if days is not None and (raw_start is not None or raw_end is not None):
+        raise ValueError("DIAS cannot be combined with from: or to:.")
+
+    if not metric_names:
+        metric_names = metric_names_with_data(data_dir)
+
+    if days is not None:
+        end_date = date.today()
+        start_date = end_date - timedelta(days=days - 1)
+        return QueryRange(start_date, end_date, metric_names)
+
+    start_date = resolve_query_boundary(data_dir, metric_names, raw_start or "data", "from")
+    end_date = resolve_query_boundary(data_dir, metric_names, raw_end or date.today().isoformat(), "to")
+
+    if start_date is None or end_date is None:
+        return QueryRange(None, None, metric_names)
+    if start_date > end_date:
+        raise ValueError("from: cannot be later than to:.")
+
+    return QueryRange(start_date, end_date, metric_names)
+
+
+def metric_names_with_data(data_dir: Path) -> list[str]:
+    return [
+        metric_name
+        for metric_name in list_metric_names(data_dir)
+        if read_metric_entries(data_dir, metric_name)
+    ]
+
+
+def resolve_query_boundary(
+    data_dir: Path,
+    metric_names: list[str],
+    raw_value: str,
+    boundary_name: str,
+) -> date | None:
+    if raw_value == "data":
+        dates = [
+            entry.entry_date
+            for metric_name in metric_names
+            for entry in read_metric_entries(data_dir, metric_name)
+        ]
+        if not dates:
+            return None
+        return min(dates) if boundary_name == "from" else max(dates)
+
+    try:
+        return parse_iso_date(raw_value)
+    except argparse.ArgumentTypeError as exc:
+        raise ValueError(str(exc)) from exc
+
+
+def resolve_export_args(args: argparse.Namespace) -> tuple[date, date, str]:
     if args.days is not None or args.metrics_arg is not None:
         if args.days is None or args.metrics_arg is None:
-            raise ValueError("use the shorthand format as: table 30 weight,gym.")
+            raise ValueError("use the shorthand format as: export jsxgraph 30 weight,gym.")
         if args.start_date is not None or args.end_date is not None or args.metrics is not None:
-            raise ValueError("do not mix table DAYS METRICS with --from/--to/--metrics.")
+            raise ValueError("do not mix export FORMAT DAYS METRICS with --from/--to/--metrics.")
 
         end_date = date.today()
         start_date = end_date - timedelta(days=args.days - 1)
@@ -644,7 +751,7 @@ def resolve_table_args(args: argparse.Namespace) -> tuple[date, date, str]:
 
     if args.start_date is None or args.end_date is None or args.metrics is None:
         raise ValueError(
-            "use table DAYS METRICS or provide --from, --to, and --metrics."
+            "use export FORMAT DAYS METRICS or provide --from, --to, and --metrics."
         )
 
     if args.start_date > args.end_date:
@@ -682,14 +789,14 @@ def handle_demo(args: argparse.Namespace) -> int:
         write_metric(args.data_dir, metric_name, metric_type, entries)
 
     display_names = ", ".join(metric_name for metric_name, _, _ in demo_metrics)
-    metrics_arg = ",".join(metric_name for metric_name, _, _ in demo_metrics)
+    metrics_arg = " ".join(f"+{metric_name}" for metric_name, _, _ in demo_metrics)
     print(f"generated {args.days} days of demo data: {display_names}")
     print(f"try: {program_name()} --data-dir {args.data_dir} table {args.days} {metrics_arg}")
     return 0
 
 
 def handle_export(args: argparse.Namespace) -> int:
-    start_date, end_date, raw_metrics = resolve_table_args(args)
+    start_date, end_date, raw_metrics = resolve_export_args(args)
     metric_names = [item.strip() for item in raw_metrics.split(",") if item.strip()]
     if not metric_names:
         raise ValueError("provide at least one metric.")
