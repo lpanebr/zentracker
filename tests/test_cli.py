@@ -367,6 +367,62 @@ class ZentrackerCliTest(unittest.TestCase):
                 ],
             )
 
+    def test_list_accepts_multiple_views_and_extra_metrics_with_stable_deduplication(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "humor.txt").write_text("2026-07-01 bom\n", encoding="utf-8")
+            (data_dir / "peso.txt").write_text("2026-07-01 97.5\n", encoding="utf-8")
+            (data_dir / "café.txt").write_text("2026-07-01 3\n", encoding="utf-8")
+
+            self.run_cli(
+                "--data-dir",
+                temp_dir,
+                "view",
+                "save",
+                "@saúde",
+                "table",
+                "+humor",
+                "+peso",
+            )
+            self.run_cli(
+                "--data-dir",
+                temp_dir,
+                "view",
+                "save",
+                "@trabalho",
+                "list",
+                "+peso",
+                "+café",
+            )
+
+            result = self.run_cli(
+                "--data-dir",
+                temp_dir,
+                "list",
+                "from:data",
+                "to:data",
+                "@saúde",
+                "@trabalho",
+                "+café",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout.strip().splitlines(),
+                [
+                    "2026-07-01 humor bom",
+                    "2026-07-01 peso 97.5",
+                    "2026-07-01 café 3",
+                ],
+            )
+
+    def test_query_rejects_unknown_view_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = self.run_cli("--data-dir", temp_dir, "table", "30", "@missing")
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("unknown view: @missing", result.stderr)
+
     def test_table_uses_latest_entry_for_same_day(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir)
@@ -450,6 +506,54 @@ class ZentrackerCliTest(unittest.TestCase):
                     "date        weight  gym",
                     f"{yesterday.isoformat()}  92.4    -",
                     f"{today.isoformat()}  92.1    yes",
+                ],
+            )
+
+    def test_table_accepts_multiple_views_and_extra_metrics(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "humor.txt").write_text("2026-07-01 bom\n", encoding="utf-8")
+            (data_dir / "peso.txt").write_text("2026-07-01 97.5\n", encoding="utf-8")
+            (data_dir / "café.txt").write_text("2026-07-01 3\n", encoding="utf-8")
+
+            self.run_cli(
+                "--data-dir",
+                temp_dir,
+                "view",
+                "save",
+                "@saúde",
+                "table",
+                "+humor",
+                "+peso",
+            )
+            self.run_cli(
+                "--data-dir",
+                temp_dir,
+                "view",
+                "save",
+                "@trabalho",
+                "list",
+                "+peso",
+                "+café",
+            )
+
+            result = self.run_cli(
+                "--data-dir",
+                temp_dir,
+                "table",
+                "from:data",
+                "to:data",
+                "@saúde",
+                "@trabalho",
+                "+café",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout.strip().splitlines(),
+                [
+                    "date        humor  peso  café",
+                    "2026-07-01  bom    97.5  3",
                 ],
             )
 
@@ -677,6 +781,34 @@ class ZentrackerCliTest(unittest.TestCase):
                 [
                     "2026-07-02 peso 97.2",
                     "2026-07-03 peso 97.0",
+                ],
+            )
+
+    def test_view_execute_accepts_additional_view_references_for_metric_expansion(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "peso.txt").write_text("2026-07-01 97.5\n", encoding="utf-8")
+            (data_dir / "humor.txt").write_text("2026-07-01 bom\n", encoding="utf-8")
+
+            self.run_cli("--data-dir", temp_dir, "view", "save", "@peso", "table", "+peso")
+            self.run_cli("--data-dir", temp_dir, "view", "save", "@humor", "list", "+humor")
+
+            result = self.run_cli(
+                "--data-dir",
+                temp_dir,
+                "view",
+                "@peso",
+                "@humor",
+                "from:data",
+                "to:data",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout.strip().splitlines(),
+                [
+                    "date        peso  humor",
+                    "2026-07-01  97.5  bom",
                 ],
             )
 

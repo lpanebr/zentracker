@@ -246,8 +246,8 @@ def build_parser() -> argparse.ArgumentParser:
             Show raw entries in chronological order.
 
             Shapes:
-              zt list DIAS [ +metric ... ]
-              zt list [from:YYYY-MM-DD|from:data] [to:YYYY-MM-DD|to:data] [ +metric ... ]
+              zt list DIAS [ @view ... ] [ +metric ... ]
+              zt list [from:YYYY-MM-DD|from:data] [to:YYYY-MM-DD|to:data] [ @view ... ] [ +metric ... ]
             """
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -256,6 +256,7 @@ def build_parser() -> argparse.ArgumentParser:
             examples:
               zt list 7
               zt list 7 +humor
+              zt list @saúde @trabalho +café
               zt list from:data +humor +academia
               zt list from:2026-07-01 to:2026-07-31 +peso +café
             """
@@ -272,8 +273,8 @@ def build_parser() -> argparse.ArgumentParser:
             Show one row per day. Repeated same-day entries use the last value.
 
             Shapes:
-              zt table DIAS [ +metric ... ]
-              zt table [from:YYYY-MM-DD|from:data] [to:YYYY-MM-DD|to:data] [ +metric ... ]
+              zt table DIAS [ @view ... ] [ +metric ... ]
+              zt table [from:YYYY-MM-DD|from:data] [to:YYYY-MM-DD|to:data] [ @view ... ] [ +metric ... ]
             """
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -282,6 +283,7 @@ def build_parser() -> argparse.ArgumentParser:
             examples:
               zt table 7
               zt table 7 +humor +academia
+              zt table 30 @saúde @trabalho +café
               zt table from:data
               zt table to:data +peso
               zt table from:2026-07-01 to:2026-07-31 +peso +café
@@ -776,10 +778,10 @@ def handle_view_execute(data_dir: Path, tokens: list[str]) -> int:
         raise ValueError(f"unknown view: @{view_name}.")
 
     definition = views[view_name]
-    range_tokens = execution_tokens or ["30"]
+    query_tokens = [*definition["tokens"], *(execution_tokens or ["30"])]
     expanded_args = argparse.Namespace(
         data_dir=data_dir,
-        tokens=[*range_tokens, *definition["tokens"]],
+        tokens=query_tokens,
     )
 
     if definition["command"] == "list":
@@ -838,11 +840,17 @@ def validate_saved_view_name(raw_name: str) -> str:
         raise ValueError("invalid saved views file: invalid view name.") from exc
 
 
+def append_unique_metric_name(metric_names: list[str], metric_name: str) -> None:
+    if metric_name not in metric_names:
+        metric_names.append(metric_name)
+
+
 def resolve_query_args(data_dir: Path, tokens: list[str]) -> QueryRange:
     days: int | None = None
     raw_start: str | None = None
     raw_end: str | None = None
     metric_names: list[str] = []
+    views = load_valid_saved_views(data_dir)
 
     for token in tokens:
         if token.isdecimal():
@@ -866,12 +874,20 @@ def resolve_query_args(data_dir: Path, tokens: list[str]) -> QueryRange:
             raw_end = token.removeprefix(TO_TOKEN_PREFIX)
             continue
 
+        if token.startswith("@"):
+            view_name = parse_view_ref(token)
+            if view_name not in views:
+                raise ValueError(f"unknown view: @{view_name}.")
+            for view_token in views[view_name]["tokens"]:
+                append_unique_metric_name(metric_names, validate_metric_name(view_token[1:]))
+            continue
+
         if is_metric_token(token):
-            metric_names.append(validate_metric_name(token[1:]))
+            append_unique_metric_name(metric_names, validate_metric_name(token[1:]))
             continue
 
         raise ValueError(
-            f"invalid query token: {token!r}. Use DIAS, from:YYYY-MM-DD, to:YYYY-MM-DD, or +metric."
+            f"invalid query token: {token!r}. Use DIAS, from:YYYY-MM-DD, to:YYYY-MM-DD, @view, or +metric."
         )
 
     if days is not None and (raw_start is not None or raw_end is not None):
