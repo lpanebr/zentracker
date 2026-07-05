@@ -1,5 +1,7 @@
 # ZenTracker
 
+![ZenTracker logo](zentracker-logo.png)
+
 Track anything and everything locally right from your CLI.
 
 ZenTracker is a local-first command-line tool for tracking arbitrary personal metrics in plain text files. It is inspired by the simplicity of `todo.txt`: fast to write, easy to read, grep-friendly, and friendly to version control.
