@@ -168,7 +168,7 @@ class ZentrackerCliTest(unittest.TestCase):
             self.assertIn("recorded 1 metric across 1 date group:", result.stdout)
             self.assertEqual(
                 (data_dir / "peso.txt").read_text(encoding="utf-8"),
-                "# type:number\n2026-07-02 97.2\n2026-07-01 96.8\n",
+                "# type:number\n2026-07-01 96.8\n2026-07-02 97.2\n",
             )
 
     def test_add_without_override_preserves_existing_same_day_history(self) -> None:
@@ -192,6 +192,29 @@ class ZentrackerCliTest(unittest.TestCase):
             self.assertEqual(
                 (data_dir / "peso.txt").read_text(encoding="utf-8"),
                 "# type:number\n2026-07-01 97.5\n2026-07-01 96.8\n",
+            )
+
+    def test_add_backfill_reorders_dates_but_preserves_same_day_sequence(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "peso.txt").write_text(
+                "# type:number\n2026-07-03 97.5\n2026-07-03 97.4\n",
+                encoding="utf-8",
+            )
+
+            result = self.run_cli(
+                "--data-dir",
+                temp_dir,
+                "add",
+                "on:2026-07-01",
+                "+peso",
+                "96.8",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                (data_dir / "peso.txt").read_text(encoding="utf-8"),
+                "# type:number\n2026-07-01 96.8\n2026-07-03 97.5\n2026-07-03 97.4\n",
             )
 
     def test_add_rejects_type_change_for_existing_metric_file(self) -> None:

@@ -35,13 +35,9 @@ def metric_path(data_dir: Path, metric_name: str) -> Path:
 
 
 def append_entry(data_dir: Path, metric_name: str, metric_type: str, entry: Entry) -> None:
-    ensure_data_dir(data_dir)
-    path = metric_path(data_dir, metric_name)
-    should_write_header = not path.exists() or path.stat().st_size == 0
-    with path.open("a", encoding="utf-8") as handle:
-        if should_write_header:
-            handle.write(f"{format_metric_type_header(metric_type)}\n")
-        handle.write(f"{entry.entry_date.isoformat()} {entry.value}\n")
+    entries = read_metric_entries(data_dir, metric_name)
+    entries.append(entry)
+    write_metric(data_dir, metric_name, metric_type, entries)
 
 
 def override_entry(data_dir: Path, metric_name: str, metric_type: str, entry: Entry) -> None:
@@ -57,9 +53,10 @@ def override_entry(data_dir: Path, metric_name: str, metric_type: str, entry: En
 def write_metric(data_dir: Path, metric_name: str, metric_type: str, entries: list[Entry]) -> None:
     ensure_data_dir(data_dir)
     path = metric_path(data_dir, metric_name)
+    ordered_entries = sorted(entries, key=lambda entry: entry.entry_date)
     with path.open("w", encoding="utf-8") as handle:
         handle.write(f"{format_metric_type_header(metric_type)}\n")
-        for entry in entries:
+        for entry in ordered_entries:
             handle.write(f"{entry.entry_date.isoformat()} {entry.value}\n")
 
 
