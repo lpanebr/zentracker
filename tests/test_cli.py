@@ -10,6 +10,8 @@ import unittest
 from datetime import date, timedelta
 from pathlib import Path
 
+from zentracker.storage import Entry, write_metric
+
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -342,6 +344,48 @@ class ZentrackerCliTest(unittest.TestCase):
                 ],
             )
 
+    def test_list_stays_raw_while_table_aggregates_same_day_duplicates(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "peso.txt").write_text(
+                "# type:number\n2026-07-01 97.5\n2026-07-01 97.2\n",
+                encoding="utf-8",
+            )
+
+            list_result = self.run_cli(
+                "--data-dir",
+                temp_dir,
+                "list",
+                "from:2026-07-01",
+                "to:2026-07-01",
+                "+peso",
+            )
+            table_result = self.run_cli(
+                "--data-dir",
+                temp_dir,
+                "table",
+                "from:2026-07-01",
+                "to:2026-07-01",
+                "+peso",
+            )
+
+            self.assertEqual(list_result.returncode, 0, list_result.stderr)
+            self.assertEqual(
+                list_result.stdout.strip().splitlines(),
+                [
+                    "2026-07-01 peso 97.5",
+                    "2026-07-01 peso 97.2",
+                ],
+            )
+            self.assertEqual(table_result.returncode, 0, table_result.stderr)
+            self.assertEqual(
+                table_result.stdout.strip().splitlines(),
+                [
+                    "date        peso",
+                    "2026-07-01  194.70",
+                ],
+            )
+
     def test_list_accepts_days_and_metric_filters(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             today = date.today()
@@ -461,6 +505,40 @@ class ZentrackerCliTest(unittest.TestCase):
                 [
                     "date        gym      mood         count  weight",
                     "2026-06-23  yes, no  bom, triste  6      184.50",
+                ],
+            )
+
+    def test_table_preserves_same_day_order_when_storage_is_sorted_by_date(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            write_metric(
+                data_dir,
+                "mood",
+                "text",
+                [
+                    Entry(date(2026, 7, 3), "terceiro"),
+                    Entry(date(2026, 7, 1), "primeiro"),
+                    Entry(date(2026, 7, 1), "segundo"),
+                ],
+            )
+
+            result = self.run_cli(
+                "--data-dir",
+                temp_dir,
+                "table",
+                "from:2026-07-01",
+                "to:2026-07-03",
+                "+mood",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout.strip().splitlines(),
+                [
+                    "date        mood",
+                    "2026-07-01  primeiro, segundo",
+                    "2026-07-02  -",
+                    "2026-07-03  terceiro",
                 ],
             )
 
@@ -627,6 +705,47 @@ class ZentrackerCliTest(unittest.TestCase):
                 [
                     "date        humor  peso  café",
                     "2026-07-01  bom    97.5  3",
+                ],
+            )
+
+    def test_table_combines_view_expansion_with_same_day_aggregation(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "mood.txt").write_text(
+                "# type:text\n2026-07-01 bom\n2026-07-01 triste\n",
+                encoding="utf-8",
+            )
+            (data_dir / "peso.txt").write_text(
+                "# type:number\n2026-07-01 97.5\n2026-07-01 97.2\n",
+                encoding="utf-8",
+            )
+
+            self.run_cli(
+                "--data-dir",
+                temp_dir,
+                "view",
+                "save",
+                "@saude",
+                "table",
+                "+mood",
+            )
+
+            result = self.run_cli(
+                "--data-dir",
+                temp_dir,
+                "table",
+                "from:2026-07-01",
+                "to:2026-07-01",
+                "@saude",
+                "+peso",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout.strip().splitlines(),
+                [
+                    "date        mood         peso",
+                    "2026-07-01  bom, triste  194.70",
                 ],
             )
 
