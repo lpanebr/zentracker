@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import sys
+import tomllib
 from collections import Counter
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -28,6 +29,7 @@ from zentracker.storage import (
     SavedView,
     append_entry,
     iter_days,
+    override_entry,
     list_metric_names,
     metric_path,
     read_metric,
@@ -96,6 +98,16 @@ class QueryRange:
 
 
 def package_version() -> str:
+    project_file = Path(__file__).resolve().parent.parent / "pyproject.toml"
+    if project_file.exists():
+        with project_file.open("rb") as handle:
+            payload = tomllib.load(handle)
+        project = payload.get("project")
+        if isinstance(project, dict):
+            project_version = project.get("version")
+            if isinstance(project_version, str):
+                return project_version
+
     try:
         return version("zentracker")
     except PackageNotFoundError:
@@ -204,6 +216,7 @@ def build_parser() -> argparse.ArgumentParser:
               - use on:YYYY-MM-DD to start a new date group
               - use as:text, as:number, as:integer, or as:bool immediately after +metric
               - without on:, entries are recorded for today
+              - use --override to replace any existing entry for the same metric on the same date
             """
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -213,10 +226,16 @@ def build_parser() -> argparse.ArgumentParser:
               zt add +peso 97.5 +academia yes +café 6
               zt add on:2026-07-01 +peso 97.5 +café 6 on:2026-07-02 +peso 97.2
               zt add +humor as:text muito bem
+              zt add on:2026-07-01 +peso 96.8 --override
             """
         ),
     )
     add_parser.add_argument("tokens", nargs="*", help="unified add tokens")
+    add_parser.add_argument(
+        "--override",
+        action="store_true",
+        help="replace existing entries for the same metric on the same date",
+    )
     add_parser.set_defaults(func=handle_add)
 
     list_parser = subparsers.add_parser(
@@ -348,7 +367,8 @@ def handle_add(args: argparse.Namespace) -> int:
     recorded, skipped = validate_batch_groups(args.data_dir, groups)
 
     for entry in recorded:
-        append_entry(
+        storage_fn = override_entry if args.override else append_entry
+        storage_fn(
             args.data_dir,
             entry.metric_name,
             entry.metric_type,

@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 from datetime import date, timedelta
 from pathlib import Path
@@ -38,9 +39,11 @@ class ZentrackerCliTest(unittest.TestCase):
 
     def test_version_option_reports_package_version(self) -> None:
         result = self.run_cli("--version")
+        with (PROJECT_ROOT / "pyproject.toml").open("rb") as handle:
+            expected_version = tomllib.load(handle)["project"]["version"]
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertRegex(result.stdout, r"^zentracker \d+\.\d+\.\d+")
+        self.assertEqual(result.stdout.strip(), f"zentracker {expected_version}")
 
     def test_add_records_multiple_metrics_with_type_inference(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -141,6 +144,54 @@ class ZentrackerCliTest(unittest.TestCase):
             self.assertEqual(
                 (Path(temp_dir) / "humor.txt").read_text(encoding="utf-8"),
                 "# type:text\n2026-07-01 muito bem\n",
+            )
+
+    def test_add_override_replaces_existing_same_day_entry(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "peso.txt").write_text(
+                "# type:number\n2026-07-01 97.5\n2026-07-01 97.4\n2026-07-02 97.2\n",
+                encoding="utf-8",
+            )
+
+            result = self.run_cli(
+                "--data-dir",
+                temp_dir,
+                "add",
+                "--override",
+                "on:2026-07-01",
+                "+peso",
+                "96.8",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("recorded 1 metric across 1 date group:", result.stdout)
+            self.assertEqual(
+                (data_dir / "peso.txt").read_text(encoding="utf-8"),
+                "# type:number\n2026-07-02 97.2\n2026-07-01 96.8\n",
+            )
+
+    def test_add_without_override_preserves_existing_same_day_history(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "peso.txt").write_text(
+                "# type:number\n2026-07-01 97.5\n",
+                encoding="utf-8",
+            )
+
+            result = self.run_cli(
+                "--data-dir",
+                temp_dir,
+                "add",
+                "on:2026-07-01",
+                "+peso",
+                "96.8",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                (data_dir / "peso.txt").read_text(encoding="utf-8"),
+                "# type:number\n2026-07-01 97.5\n2026-07-01 96.8\n",
             )
 
     def test_add_rejects_type_change_for_existing_metric_file(self) -> None:

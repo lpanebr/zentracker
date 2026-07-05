@@ -44,6 +44,16 @@ def append_entry(data_dir: Path, metric_name: str, metric_type: str, entry: Entr
         handle.write(f"{entry.entry_date.isoformat()} {entry.value}\n")
 
 
+def override_entry(data_dir: Path, metric_name: str, metric_type: str, entry: Entry) -> None:
+    entries = [
+        existing_entry
+        for existing_entry in read_metric_entries(data_dir, metric_name)
+        if existing_entry.entry_date != entry.entry_date
+    ]
+    entries.append(entry)
+    write_metric(data_dir, metric_name, metric_type, entries)
+
+
 def write_metric(data_dir: Path, metric_name: str, metric_type: str, entries: list[Entry]) -> None:
     ensure_data_dir(data_dir)
     path = metric_path(data_dir, metric_name)
