@@ -270,7 +270,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="show a table for a date range",
         description=dedent(
             """\
-            Show one row per day. Repeated same-day entries use the last value.
+            Show one row per day. Repeated same-day entries are aggregated by metric type.
 
             Shapes:
               zt table DIAS [ @view ... ] [ +metric ... ]
@@ -686,7 +686,10 @@ def handle_table(args: argparse.Namespace) -> int:
         return 0
 
     metric_names = query.metric_names
-    datasets = {metric_name: read_metric(args.data_dir, metric_name) for metric_name in metric_names}
+    datasets = {
+        metric_name: build_table_metric_dataset(args.data_dir, metric_name)
+        for metric_name in metric_names
+    }
     rows: list[list[str]] = []
     for current_day in iter_days(query.start_date, query.end_date):
         row = [current_day.isoformat()]
@@ -696,6 +699,35 @@ def handle_table(args: argparse.Namespace) -> int:
 
     print(format_table(["date", *metric_names], rows))
     return 0
+
+
+def build_table_metric_dataset(data_dir: Path, metric_name: str) -> dict[date, str]:
+    metric_type = read_metric_type(data_dir, metric_name)
+    grouped_values: dict[date, list[str]] = {}
+    for entry in read_metric_entries(data_dir, metric_name):
+        grouped_values.setdefault(entry.entry_date, []).append(entry.value)
+
+    return {
+        entry_date: aggregate_table_metric_values(metric_type, values)
+        for entry_date, values in grouped_values.items()
+    }
+
+
+def aggregate_table_metric_values(metric_type: str, values: list[str]) -> str:
+    if not values:
+        return "-"
+
+    if metric_type in {"bool", "text"}:
+        return ", ".join(values)
+
+    if metric_type == "integer":
+        return str(sum(int(value, 10) for value in values))
+
+    if metric_type == "number":
+        total = sum((Decimal(value) for value in values), Decimal("0"))
+        return f"{total:.2f}"
+
+    raise AssertionError(f"unsupported metric type for table aggregation: {metric_type}")
 
 
 def handle_view(args: argparse.Namespace) -> int:

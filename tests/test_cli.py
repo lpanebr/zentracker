@@ -423,11 +423,52 @@ class ZentrackerCliTest(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertIn("unknown view: @missing", result.stderr)
 
-    def test_table_uses_latest_entry_for_same_day(self) -> None:
+    def test_table_aggregates_same_day_entries_by_type(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "gym.txt").write_text(
+                "# type:bool\n2026-06-23 yes\n2026-06-23 no\n",
+                encoding="utf-8",
+            )
+            (data_dir / "mood.txt").write_text(
+                "# type:text\n2026-06-23 bom\n2026-06-23 triste\n",
+                encoding="utf-8",
+            )
+            (data_dir / "count.txt").write_text(
+                "# type:integer\n2026-06-23 1\n2026-06-23 2\n2026-06-23 3\n",
+                encoding="utf-8",
+            )
+            (data_dir / "weight.txt").write_text(
+                "# type:number\n2026-06-23 92.4\n2026-06-23 92.1\n",
+                encoding="utf-8",
+            )
+
+            result = self.run_cli(
+                "--data-dir",
+                temp_dir,
+                "table",
+                "from:2026-06-23",
+                "to:2026-06-23",
+                "+gym",
+                "+mood",
+                "+count",
+                "+weight",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout.strip().splitlines(),
+                [
+                    "date        gym      mood         count  weight",
+                    "2026-06-23  yes, no  bom, triste  6      184.50",
+                ],
+            )
+
+    def test_table_number_with_single_value_renders_two_decimals(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             data_dir = Path(temp_dir)
             (data_dir / "weight.txt").write_text(
-                "2026-06-23 92.4\n2026-06-23 92.1\n",
+                "# type:number\n2026-06-23 1.5\n",
                 encoding="utf-8",
             )
 
@@ -441,7 +482,39 @@ class ZentrackerCliTest(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("2026-06-23  92.1", result.stdout)
+            self.assertEqual(
+                result.stdout.strip().splitlines(),
+                [
+                    "date        weight",
+                    "2026-06-23  1.50",
+                ],
+            )
+
+    def test_table_legacy_metric_without_type_uses_text_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir)
+            (data_dir / "weight.txt").write_text(
+                "2026-06-23 1.5\n2026-06-23 2.25\n",
+                encoding="utf-8",
+            )
+
+            result = self.run_cli(
+                "--data-dir",
+                temp_dir,
+                "table",
+                "from:2026-06-23",
+                "to:2026-06-23",
+                "+weight",
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout.strip().splitlines(),
+                [
+                    "date        weight",
+                    "2026-06-23  1.5, 2.25",
+                ],
+            )
 
     def test_table_combines_metrics_and_marks_missing_data(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
