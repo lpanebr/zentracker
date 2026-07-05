@@ -209,29 +209,6 @@ zt view list
 zt view delete @pessoal
 ```
 
-## Examples
-
-Listing metrics with data:
-
-```txt
-gym
-mood
-weight
-```
-
-Table output:
-
-```txt
-date        weight  gym  mood
-2026-06-20  92.4    yes  -
-2026-06-21  92.1    no   focused
-2026-06-22  -       yes  tired
-```
-
-Sample files live in [examples/](examples/).
-
-For a more useful live demo, use `zt demo`; it generates sample data for the last 30 days relative to the current date, so `zt table 30 +weight +gym +mood` immediately shows populated rows.
-
 ## ZenNotes And JSXGraph
 
 ZenTracker can export numeric and boolean metrics as a JSXGraph Markdown block for [ZenNotes](https://github.com/ZenNotes/zennotes), which renders `jsxgraph` fenced code blocks. The block content is JSON, not JavaScript, and follows ZenNotes' `objects` schema:
