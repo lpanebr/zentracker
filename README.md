@@ -10,12 +10,41 @@ It is not a dashboard, a database, or a cloud habit tracker. It is a small tool 
 
 ## Why
 
-- local-first by default;
-- one plain text file per metric;
-- no account, server, sync, or database required;
-- simple enough to inspect with `cat`, `rg`, `awk`, or Git;
-- structured enough for tables and future automation;
-- designed to leave room for compact, natural-language-like input later, in the spirit of `todo.txt`.
+I wanted something to record and track random stuff about me and my work.
+
+The tool should:
+- use local files stored anywhere or on a per project basis;
+- store one plain text file per metric so that me or any AI tool could understand it without context;
+- be simple enough to allow automations with `cat`, `rg`, `awk`, etc.;
+- be structured enough for tables and future automation;
+- allow for a natural entry and be user friendly by adopting a `todo.txt`-like syntax that is also used by the Tuxedo task manager.
+
+## See it in action
+
+### Quick Start
+
+![ZenTracker quick start demo](quick-start.gif)
+
+Generate sample data and jump straight from `demo` to raw `list` output and a populated `table`.
+
+### Same-Day Aggregation
+
+![ZenTracker same-day aggregation demo](same-day-aggregation.gif)
+
+Shows how repeated entries on the same day stay raw in `list` but are aggregated by type in `table`.
+
+### Saved Views
+
+![ZenTracker saved views demo](saved-views.gif)
+
+Save a reusable query once, list it later, and execute it as a shortcut for repeated reporting.
+
+### Views Workflow
+
+![ZenTracker views workflow demo](views-workflow.gif)
+
+Shows saved `list` and `table` views side by side, from `view save` through `view list` and execution their usage also supported with the `list` and `table` commands allowing additional `+metrics` on the fly.
+
 
 ## Install
 
