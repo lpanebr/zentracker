@@ -242,14 +242,23 @@ Check the installed version with:
 zt --version
 ```
 
-## Roadmap
+## Contributing
 
-- compact input for recording several metrics at once;
-- natural-language-assisted input that expands into structured metric entries;
-- lightweight summaries by period;
-- terminal-friendly ASCII plots;
-- more export formats for JavaScript chart libraries;
-- more table and export options.
+Contributions are welcome. Please keep changes small and focused, match the existing CLI and storage conventions, and add or update tests for any behavior change.
+
+Before sending a change, run:
+
+```bash
+python -m unittest discover -s tests -q
+```
+
+If your change affects the CLI output, include a test that exercises the exact command and expected text output.
+
+## Disclaimer
+
+ZenTracker was originally built for the developer who maintains it.
+
+The project is developed with the help of AI tools, but each change is still planned, reviewed, and tested by the human maintainer before it is accepted.
 
 ## License
 
